@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -71,6 +71,7 @@ export default function MustahikPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingMustahik, setEditingMustahik] = useState<Mustahik | null>(null);
   const [deletingMustahik, setDeletingMustahik] = useState<Mustahik | null>(null);
+  const [asnafFilter, setAsnafFilter] = useState<"all" | "amil" | "non_amil">("all");
   const [formData, setFormData] = useState({
     name: "",
     address: "",
@@ -294,13 +295,31 @@ export default function MustahikPage() {
     { key: "phone", header: "Telepon" },
   ];
 
+  const amilCount = useMemo(
+    () => mustahikList.filter((item) => item.asnaf_settings?.asnaf_code === "amil").length,
+    [mustahikList],
+  );
+  const nonAmilCount = useMemo(
+    () => mustahikList.filter((item) => item.asnaf_settings?.asnaf_code !== "amil").length,
+    [mustahikList],
+  );
+  const filteredMustahikList = useMemo(() => {
+    if (asnafFilter === "amil") {
+      return mustahikList.filter((item) => item.asnaf_settings?.asnaf_code === "amil");
+    }
+    if (asnafFilter === "non_amil") {
+      return mustahikList.filter((item) => item.asnaf_settings?.asnaf_code !== "amil");
+    }
+    return mustahikList;
+  }, [mustahikList, asnafFilter]);
+
   return (
     <AppLayout title="Data Mustahik">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
       <DataTable
         title="Daftar Mustahik"
-        data={mustahikList}
+        data={filteredMustahikList}
         columns={columns}
         isLoading={isLoading}
         isReadOnly={isReadOnly}
@@ -309,6 +328,29 @@ export default function MustahikPage() {
         searchKey="name"
         searchPlaceholder="Cari mustahik..."
         emptyMessage="Belum ada data mustahik"
+        toolbarExtra={
+          <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-background/80 px-2 py-1">
+            <Badge variant="outline" className="hidden sm:inline-flex">
+              Amil: {amilCount}
+            </Badge>
+            <Badge variant="outline" className="hidden sm:inline-flex">
+              Non-Amil: {nonAmilCount}
+            </Badge>
+            <Select
+              value={asnafFilter}
+              onValueChange={(value) => setAsnafFilter(value as "all" | "amil" | "non_amil")}
+            >
+              <SelectTrigger className="h-8 min-w-[170px] border-0 bg-transparent px-2 text-xs focus:ring-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Semua Asnaf</SelectItem>
+                <SelectItem value="amil">Amil Saja</SelectItem>
+                <SelectItem value="non_amil">Selain Amil</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        }
         actions={(mustahik) => (
           !isReadOnly ? (
             <div className="flex items-center gap-1">

@@ -1,51 +1,26 @@
-import { useState, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
-import { DistributionSummaryTab } from "@/components/distribution/DistributionSummaryTab";
-import { DistributionPreviewTab } from "@/components/distribution/DistributionPreviewTab";
 import { DistributionAssignmentTab } from "@/components/distribution/DistributionAssignmentTab";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { useAsnafSettings } from "@/hooks/useAsnafSettings";
+import { useDistributionCalculation, type AmilDistributionMode } from "@/hooks/useDistributionCalculation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, Calculator, Users, UserCheck, FileText, ClipboardList } from "lucide-react";
+import { formatCurrency } from "@/lib/formatCurrency";
+import { Calculator, ClipboardList, Eye, PackageCheck, UserCheck, Users } from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
-import { useDistributionCalculation } from "@/hooks/useDistributionCalculation";
-import { formatCurrency } from "@/lib/formatCurrency";
 import type { Enums } from "@/integrations/supabase/types";
 
 const FUND_CATEGORY_LABELS: Record<string, string> = {
@@ -70,6 +45,12 @@ const STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secon
   cancelled: { label: "Dibatalkan", variant: "destructive" },
 };
 
+const DELIVERY_STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  pending: { label: "Belum Dikirim", variant: "secondary" },
+  delivered: { label: "Terkirim", variant: "default" },
+  not_delivered: { label: "Tidak Terkirim", variant: "destructive" },
+};
+
 interface Distribution {
   id: string;
   period_id: string;
@@ -91,9 +72,17 @@ interface FundBalance {
   total_food_kg: number;
 }
 
-type DistributionType = "zakat" | "fidyah" | "preview" | "assignment" | "summary";
+type DistributionTab = "distribution" | "assignment";
 type FundCategory = Enums<"fund_category">;
 type DistributionStatus = Enums<"distribution_status">;
+
+const normalizeAmilMode = (mode: string | null | undefined): AmilDistributionMode =>
+  mode === "proportional_with_factor" ? "proportional_with_factor" : "percentage";
+
+const normalizeAmilShareFactor = (factor: number | null | undefined): number => {
+  if (typeof factor !== "number" || Number.isNaN(factor)) return 0.5;
+  return Math.max(0, Math.min(1, factor));
+};
 
 export default function Distribution() {
   const { isReadOnly, selectedPeriod } = usePeriod();
@@ -101,18 +90,18 @@ export default function Distribution() {
   const { getLabel } = useAsnafSettings();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<DistributionType>("zakat");
+  const [activeTab, setActiveTab] = useState<DistributionTab>("distribution");
+  const [categoryFilter, setCategoryFilter] = useState<FundCategory | "all">("all");
   const [viewingDistribution, setViewingDistribution] = useState<Distribution | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewCategory, setPreviewCategory] = useState<FundCategory | "">("");
   const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
 
-  const zakatCategories: FundCategory[] = ["zakat_fitrah_cash", "zakat_fitrah_rice", "zakat_mal"];
-  const fidyahCategories: FundCategory[] = ["fidyah_cash", "fidyah_food"];
-  const currentCategories = activeTab === "zakat" ? zakatCategories : fidyahCategories;
-  const tableName = activeTab === "zakat" ? "zakat_distributions" : "fidyah_distributions";
+  const allCategories: FundCategory[] = ["zakat_fitrah_cash", "zakat_fitrah_rice", "zakat_mal", "fidyah_cash", "fidyah_food"];
 
-  // Fetch fund balances
+  const amilDistributionMode = normalizeAmilMode(selectedPeriod?.amil_distribution_mode);
+  const amilShareFactor = normalizeAmilShareFactor(selectedPeriod?.amil_share_factor);
+
   const { data: fundBalances = [] } = useQuery({
     queryKey: ["fund-balances", selectedPeriod?.id],
     queryFn: async () => {
@@ -126,14 +115,13 @@ export default function Distribution() {
     enabled: !!selectedPeriod?.id,
   });
 
-  // Fetch distribution assignments for delivery status
   const { data: distributionAssignments = [] } = useQuery({
     queryKey: ["distribution-assignments", selectedPeriod?.id],
     queryFn: async () => {
       if (!selectedPeriod?.id) return [];
       const { data, error } = await supabase
         .from("distribution_assignments")
-        .select("mustahik_id, status, delivery_notes, delivered_at, assigned_to")
+        .select("mustahik_id, status, delivery_notes, delivered_at")
         .eq("period_id", selectedPeriod.id);
       if (error) throw error;
       return data;
@@ -141,10 +129,9 @@ export default function Distribution() {
     enabled: !!selectedPeriod?.id,
   });
 
-  // Create a map of mustahik_id to delivery status
   const deliveryStatusMap = useMemo(() => {
     const map = new Map<string, { status: string; deliveryNotes: string | null; deliveredAt: string | null }>();
-    distributionAssignments.forEach(a => {
+    distributionAssignments.forEach((a) => {
       map.set(a.mustahik_id, {
         status: a.status,
         deliveryNotes: a.delivery_notes,
@@ -154,7 +141,6 @@ export default function Distribution() {
     return map;
   }, [distributionAssignments]);
 
-  // Fetch distributions for both tables
   const { data: zakatDistributions = [] } = useQuery({
     queryKey: ["zakat_distributions", selectedPeriod?.id],
     queryFn: async () => {
@@ -185,9 +171,17 @@ export default function Distribution() {
     enabled: !!selectedPeriod?.id,
   });
 
-  const distributions = activeTab === "zakat" ? zakatDistributions : fidyahDistributions;
+  const mergedDistributions = useMemo(() => {
+    return [...zakatDistributions, ...fidyahDistributions].sort(
+      (a, b) => new Date(b.distribution_date).getTime() - new Date(a.distribution_date).getTime(),
+    );
+  }, [zakatDistributions, fidyahDistributions]);
 
-  // Fetch mustahik list with family members and asnaf_settings (excluding soft-deleted)
+  const filteredDistributions = useMemo(() => {
+    if (categoryFilter === "all") return mergedDistributions;
+    return mergedDistributions.filter((d) => d.fund_category === categoryFilter);
+  }, [categoryFilter, mergedDistributions]);
+
   const { data: mustahikList = [] } = useQuery({
     queryKey: ["mustahik-active-full"],
     queryFn: async () => {
@@ -199,39 +193,49 @@ export default function Distribution() {
         .order("priority", { ascending: false })
         .order("name");
       if (error) throw error;
-      return data as { id: string; name: string; asnaf_id: string; priority: string; family_members: number; asnaf_settings: { asnaf_code: string } | null }[];
+      return data as {
+        id: string;
+        name: string;
+        asnaf_id: string;
+        priority: string;
+        family_members: number;
+        asnaf_settings: { asnaf_code: string } | null;
+      }[];
     },
   });
 
-  // Use distribution calculation hook
   const allExistingDistributions = useMemo(() => {
-    return [...zakatDistributions, ...fidyahDistributions].map(d => ({
+    return [...zakatDistributions, ...fidyahDistributions].map((d) => ({
       mustahik_id: d.mustahik_id,
       fund_category: d.fund_category,
       status: d.status,
     }));
   }, [zakatDistributions, fidyahDistributions]);
 
-  const calculations = useDistributionCalculation(
-    mustahikList,
-    fundBalances,
-    allExistingDistributions
-  );
+  const calculations = useDistributionCalculation(mustahikList, fundBalances, allExistingDistributions, {
+    amilDistributionMode,
+    amilShareFactor,
+  });
 
-  const getBalance = (category: string) => {
-    const balance = fundBalances.find(b => b.category === category);
+  const getBalance = (category: FundCategory) => {
+    const balance = fundBalances.find((b) => b.category === category);
     return balance || { total_cash: 0, total_rice_kg: 0, total_food_kg: 0 };
   };
 
-  // Get calculated distribution for preview
   const getCalculatedDistribution = (category: FundCategory | "") => {
     switch (category) {
-      case "zakat_fitrah_cash": return calculations.zakatFitrahCash;
-      case "zakat_fitrah_rice": return calculations.zakatFitrahRice;
-      case "zakat_mal": return calculations.zakatMal;
-      case "fidyah_cash": return calculations.fidyahCash;
-      case "fidyah_food": return calculations.fidyahFood;
-      default: return { amil: [], beneficiaries: [], amilTotal: 0, beneficiaryTotal: 0 };
+      case "zakat_fitrah_cash":
+        return calculations.zakatFitrahCash;
+      case "zakat_fitrah_rice":
+        return calculations.zakatFitrahRice;
+      case "zakat_mal":
+        return calculations.zakatMal;
+      case "fidyah_cash":
+        return calculations.fidyahCash;
+      case "fidyah_food":
+        return calculations.fidyahFood;
+      default:
+        return { amil: [], beneficiaries: [], amilTotal: 0, beneficiaryTotal: 0 };
     }
   };
 
@@ -241,7 +245,6 @@ export default function Distribution() {
     setIsPreviewOpen(true);
   };
 
-  // Batch distribution mutation
   const batchDistributeMutation = useMutation({
     mutationFn: async () => {
       if (!selectedPeriod?.id || selectedRecipients.size === 0) {
@@ -253,22 +256,21 @@ export default function Distribution() {
 
       const calc = getCalculatedDistribution(previewCategory);
       const allRecipients = [...calc.amil, ...calc.beneficiaries];
-      const selectedList = allRecipients.filter(r => selectedRecipients.has(r.mustahikId));
+      const selectedList = allRecipients.filter((r) => selectedRecipients.has(r.mustahikId));
 
       const isZakat = previewCategory.startsWith("zakat");
       const table = isZakat ? "zakat_distributions" : "fidyah_distributions";
 
       for (const recipient of selectedList) {
-        // Check if already distributed
         const existingDist = allExistingDistributions.find(
-          d => d.mustahik_id === recipient.mustahikId && 
-               d.fund_category === previewCategory &&
-               (d.status === "distributed" || d.status === "approved")
+          (d) =>
+            d.mustahik_id === recipient.mustahikId &&
+            d.fund_category === previewCategory &&
+            (d.status === "distributed" || d.status === "approved"),
         );
-        
-        if (existingDist) continue; // Skip already distributed
 
-        // Create distribution record
+        if (existingDist) continue;
+
         const insertData: {
           period_id: string;
           mustahik_id: string;
@@ -283,7 +285,7 @@ export default function Distribution() {
           mustahik_id: recipient.mustahikId,
           fund_category: previewCategory,
           status: "distributed",
-          notes: "Distribusi otomatis",
+          notes: "Pendistribusian otomatis dari menu Pendistribusian",
         };
 
         if (isZakat) {
@@ -294,18 +296,11 @@ export default function Distribution() {
           insertData.food_amount_kg = recipient.foodAmount || 0;
         }
 
-        const { data: dist, error: distError } = await supabase
-          .from(table)
-          .insert(insertData)
-          .select()
-          .single();
-
+        const { data: dist, error: distError } = await supabase.from(table).insert(insertData).select().single();
         if (distError) throw distError;
 
-        // Create ledger entry for deduction
-        const { error: ledgerError } = await supabase
-          .from("fund_ledger")
-          .insert([{
+        const { error: ledgerError } = await supabase.from("fund_ledger").insert([
+          {
             period_id: selectedPeriod.id,
             category: previewCategory,
             transaction_type: "distribution" as const,
@@ -314,8 +309,9 @@ export default function Distribution() {
             amount_food_kg: -(recipient.foodAmount || 0),
             reference_id: dist.id,
             reference_type: table,
-            description: `Distribusi ke ${recipient.name}`,
-          }]);
+            description: `Pendistribusian ke ${recipient.name}`,
+          },
+        ]);
 
         if (ledgerError) throw ledgerError;
       }
@@ -326,7 +322,7 @@ export default function Distribution() {
       queryClient.invalidateQueries({ queryKey: ["fund-balances"] });
       setIsPreviewOpen(false);
       setSelectedRecipients(new Set());
-      toast({ title: `${selectedRecipients.size} distribusi berhasil dicatat` });
+      toast({ title: `${selectedRecipients.size} pendistribusian berhasil dicatat` });
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Gagal", description: error.message });
@@ -345,14 +341,12 @@ export default function Distribution() {
 
   const selectAll = (recipients: { mustahikId: string }[]) => {
     const distributed = allExistingDistributions
-      .filter(d => d.fund_category === previewCategory && (d.status === "distributed" || d.status === "approved"))
-      .map(d => d.mustahik_id);
-    
-    const eligible = recipients.filter(r => !distributed.includes(r.mustahikId));
-    setSelectedRecipients(new Set(eligible.map(r => r.mustahikId)));
-  };
+      .filter((d) => d.fund_category === previewCategory && (d.status === "distributed" || d.status === "approved"))
+      .map((d) => d.mustahik_id);
 
-  const formatCurrencyLocal = (value: number) => formatCurrency(value);
+    const eligible = recipients.filter((r) => !distributed.includes(r.mustahikId));
+    setSelectedRecipients(new Set(eligible.map((r) => r.mustahikId)));
+  };
 
   const renderBalanceCard = (category: FundCategory) => {
     const balance = getBalance(category);
@@ -360,45 +354,28 @@ export default function Distribution() {
     const isRice = category.includes("rice");
     const calc = getCalculatedDistribution(category);
     const totalRecipients = calc.amil.length + calc.beneficiaries.length;
-    
+
     return (
-      <Card key={category} className="flex-1 min-w-[200px]">
+      <Card key={category} className="border-border/70">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            {FUND_CATEGORY_LABELS[category]}
-          </CardTitle>
+          <CardTitle className="text-sm font-medium text-muted-foreground">{FUND_CATEGORY_LABELS[category]}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <p className="text-xl font-bold">
-            {isCash
-              ? formatCurrencyLocal(balance.total_cash)
-              : isRice
-              ? `${balance.total_rice_kg} kg`
-              : `${balance.total_food_kg} kg`}
+          <p className="text-xl font-semibold">
+            {isCash ? formatCurrency(balance.total_cash) : isRice ? `${balance.total_rice_kg} kg` : `${balance.total_food_kg} kg`}
           </p>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{totalRecipients} penerima eligible</span>
+            <span>{totalRecipients} penerima siap distribusi</span>
             {!isReadOnly && totalRecipients > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => openPreview(category)}
-              >
-                <Calculator className="h-3 w-3 mr-1" />
-                Preview
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openPreview(category)}>
+                <Calculator className="mr-1 h-3 w-3" />
+                Jalankan
               </Button>
             )}
           </div>
         </CardContent>
       </Card>
     );
-  };
-
-  const DELIVERY_STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-    pending: { label: "Belum Dikirim", variant: "secondary" },
-    delivered: { label: "Terkirim", variant: "default" },
-    not_delivered: { label: "Tidak Terkirim", variant: "destructive" },
   };
 
   const renderDistributionTable = () => (
@@ -410,19 +387,17 @@ export default function Distribution() {
           <TableHead>Asnaf</TableHead>
           <TableHead>Kategori</TableHead>
           <TableHead className="text-right">Jumlah</TableHead>
-          <TableHead>Status Distribusi</TableHead>
+          <TableHead>Status Pendistribusian</TableHead>
           <TableHead>Status Pengiriman</TableHead>
           <TableHead className="text-right">Aksi</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {distributions.map(dist => {
+        {filteredDistributions.map((dist) => {
           const deliveryInfo = deliveryStatusMap.get(dist.mustahik_id);
           return (
             <TableRow key={dist.id}>
-              <TableCell>
-                {format(new Date(dist.distribution_date), "dd MMM yyyy", { locale: idLocale })}
-              </TableCell>
+              <TableCell>{format(new Date(dist.distribution_date), "dd MMM yyyy", { locale: idLocale })}</TableCell>
               <TableCell className="font-medium">{dist.mustahik?.name}</TableCell>
               <TableCell>
                 <Badge variant={dist.mustahik?.asnaf === "amil" ? "default" : "outline"}>
@@ -432,15 +407,13 @@ export default function Distribution() {
               <TableCell>{FUND_CATEGORY_LABELS[dist.fund_category]}</TableCell>
               <TableCell className="text-right">
                 {dist.fund_category.includes("cash") || dist.fund_category === "zakat_mal"
-                  ? formatCurrencyLocal(dist.cash_amount || 0)
+                  ? formatCurrency(dist.cash_amount || 0)
                   : dist.fund_category.includes("rice")
-                  ? `${dist.rice_amount_kg || 0} kg`
-                  : `${dist.food_amount_kg || 0} kg`}
+                    ? `${dist.rice_amount_kg || 0} kg`
+                    : `${dist.food_amount_kg || 0} kg`}
               </TableCell>
               <TableCell>
-                <Badge variant={STATUS_CONFIG[dist.status].variant}>
-                  {STATUS_CONFIG[dist.status].label}
-                </Badge>
+                <Badge variant={STATUS_CONFIG[dist.status].variant}>{STATUS_CONFIG[dist.status].label}</Badge>
               </TableCell>
               <TableCell>
                 {deliveryInfo ? (
@@ -464,120 +437,120 @@ export default function Distribution() {
   );
 
   const previewCalc = getCalculatedDistribution(previewCategory);
+  const previewTotal = previewCalc.amilTotal + previewCalc.beneficiaryTotal;
+  const previewAmilPercent = previewTotal > 0 ? (previewCalc.amilTotal / previewTotal) * 100 : 0;
+  const previewBeneficiaryPercent = previewTotal > 0 ? (previewCalc.beneficiaryTotal / previewTotal) * 100 : 0;
+
   const distributedIds = new Set(
     allExistingDistributions
-      .filter(d => d.fund_category === previewCategory && (d.status === "distributed" || d.status === "approved"))
-      .map(d => d.mustahik_id)
+      .filter((d) => d.fund_category === previewCategory && (d.status === "distributed" || d.status === "approved"))
+      .map((d) => d.mustahik_id),
   );
 
   return (
-    <AppLayout title="Distribusi">
+    <AppLayout title="Pendistribusian">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
       <div className="space-y-4">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as DistributionType)}>
-          <TabsList className="flex-wrap">
-            <TabsTrigger value="zakat">Distribusi Zakat</TabsTrigger>
-            <TabsTrigger value="fidyah">Distribusi Fidyah</TabsTrigger>
-            <TabsTrigger value="preview" className="gap-1">
-              <Calculator className="h-4 w-4" />
-              Preview
+        <Card className="border-border/70 bg-gradient-to-r from-cyan-50 to-emerald-50">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-base font-semibold">Eksekusi Pendistribusian Dana per Periode</h2>
+              <p className="text-sm text-muted-foreground">
+                Halaman ini fokus untuk eksekusi penyaluran dan penugasan pengiriman.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Badge variant="outline">Mode: {amilDistributionMode === "percentage" ? "Persentase Tetap" : "Rasio x Faktor"}</Badge>
+                <Badge variant="outline">Faktor: {amilShareFactor.toFixed(2)}</Badge>
+              </div>
+            </div>
+            <Button asChild variant="outline">
+              <Link href="/calculations">Buka Simulasi Perhitungan</Link>
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as DistributionTab)}>
+          <TabsList>
+            <TabsTrigger value="distribution" className="gap-1">
+              <PackageCheck className="h-4 w-4" />
+              Eksekusi
             </TabsTrigger>
             <TabsTrigger value="assignment" className="gap-1">
               <ClipboardList className="h-4 w-4" />
               Penugasan
             </TabsTrigger>
-            <TabsTrigger value="summary" className="gap-1">
-              <FileText className="h-4 w-4" />
-              Riwayat
-            </TabsTrigger>
           </TabsList>
 
-          {/* Balance Cards - only show for zakat/fidyah tabs */}
-          {(activeTab === "zakat" || activeTab === "fidyah") && (
-            <div className="flex gap-4 flex-wrap mt-4">
-              {currentCategories.map(renderBalanceCard)}
-            </div>
-          )}
+          <TabsContent value="distribution" className="space-y-4 mt-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{allCategories.map(renderBalanceCard)}</div>
 
-          <TabsContent value="zakat" className="mt-4">
             <Card>
-              <CardContent className="pt-6">
-                {distributions.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-8">
-                    Belum ada distribusi zakat untuk periode ini
-                  </p>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <CardTitle className="text-base">Riwayat Pendistribusian</CardTitle>
+                    <CardDescription>
+                      Menampilkan seluruh distribusi zakat dan fidyah, tanpa duplikasi tab.
+                    </CardDescription>
+                  </div>
+                  <div className="w-full md:w-[260px]">
+                    <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v as FundCategory | "all") }>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Filter kategori" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Semua Kategori</SelectItem>
+                        {allCategories.map((cat) => (
+                          <SelectItem key={cat} value={cat}>
+                            {FUND_CATEGORY_LABELS[cat]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {filteredDistributions.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">Belum ada distribusi untuk filter ini.</p>
                 ) : (
                   renderDistributionTable()
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
-
-          <TabsContent value="fidyah" className="mt-4">
-            <Card>
-              <CardContent className="pt-6">
-                {distributions.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-8">
-                    Belum ada distribusi fidyah untuk periode ini
-                  </p>
-                ) : (
-                  renderDistributionTable()
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="preview" className="mt-4">
-            {selectedPeriod?.id ? (
-              <DistributionPreviewTab periodId={selectedPeriod.id} />
-            ) : (
-              <p className="text-muted-foreground text-center py-8">
-                Pilih periode untuk melihat preview distribusi
-              </p>
-            )}
           </TabsContent>
 
           <TabsContent value="assignment" className="mt-4">
             {selectedPeriod?.id ? (
               <DistributionAssignmentTab periodId={selectedPeriod.id} isReadOnly={isReadOnly} />
             ) : (
-              <p className="text-muted-foreground text-center py-8">
-                Pilih periode untuk melihat penugasan distribusi
-              </p>
-            )}
-          </TabsContent>
-
-          <TabsContent value="summary" className="mt-4">
-            {selectedPeriod?.id ? (
-              <DistributionSummaryTab periodId={selectedPeriod.id} />
-            ) : (
-              <p className="text-muted-foreground text-center py-8">
-                Pilih periode untuk melihat riwayat distribusi
-              </p>
+              <Card>
+                <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                  Pilih periode untuk melihat penugasan distribusi.
+                </CardContent>
+              </Card>
             )}
           </TabsContent>
         </Tabs>
       </div>
 
-      {/* Distribution Preview Dialog */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Calculator className="h-5 w-5" />
-              Preview Distribusi - {FUND_CATEGORY_LABELS[previewCategory]}
+              Eksekusi Pendistribusian - {FUND_CATEGORY_LABELS[previewCategory]}
             </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* Amil Section */}
             {previewCalc.amil.length > 0 && (
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2">
+                  <CardTitle className="flex items-center gap-2 text-sm">
                     <UserCheck className="h-4 w-4" />
-                    Amil (12.5% = {previewCategory.includes("cash") || previewCategory === "zakat_mal"
+                    Amil ({previewAmilPercent.toFixed(1)}% = {previewCategory.includes("cash") || previewCategory === "zakat_mal"
                       ? formatCurrency(previewCalc.amilTotal)
                       : `${previewCalc.amilTotal.toFixed(2)} kg`})
                   </CardTitle>
@@ -588,16 +561,16 @@ export default function Distribution() {
                       <TableRow>
                         <TableHead className="w-12">
                           <Checkbox
-                            checked={previewCalc.amil.every(a => selectedRecipients.has(a.mustahikId) || distributedIds.has(a.mustahikId))}
+                            checked={previewCalc.amil.every((a) => selectedRecipients.has(a.mustahikId) || distributedIds.has(a.mustahikId))}
                             onCheckedChange={() => {
-                              const eligible = previewCalc.amil.filter(a => !distributedIds.has(a.mustahikId));
-                              if (eligible.every(a => selectedRecipients.has(a.mustahikId))) {
+                              const eligible = previewCalc.amil.filter((a) => !distributedIds.has(a.mustahikId));
+                              if (eligible.every((a) => selectedRecipients.has(a.mustahikId))) {
                                 const newSet = new Set(selectedRecipients);
-                                eligible.forEach(a => newSet.delete(a.mustahikId));
+                                eligible.forEach((a) => newSet.delete(a.mustahikId));
                                 setSelectedRecipients(newSet);
                               } else {
                                 const newSet = new Set(selectedRecipients);
-                                eligible.forEach(a => newSet.add(a.mustahikId));
+                                eligible.forEach((a) => newSet.add(a.mustahikId));
                                 setSelectedRecipients(newSet);
                               }
                             }}
@@ -609,7 +582,7 @@ export default function Distribution() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {previewCalc.amil.map(a => {
+                      {previewCalc.amil.map((a) => {
                         const isDistributed = distributedIds.has(a.mustahikId);
                         return (
                           <TableRow key={a.mustahikId} className={isDistributed ? "opacity-50" : ""}>
@@ -625,11 +598,7 @@ export default function Distribution() {
                               {a.cashAmount > 0 ? formatCurrency(a.cashAmount) : `${a.riceAmount || a.foodAmount} kg`}
                             </TableCell>
                             <TableCell>
-                              {isDistributed ? (
-                                <Badge variant="outline">Sudah Disalurkan</Badge>
-                              ) : (
-                                <Badge variant="secondary">Belum</Badge>
-                              )}
+                              {isDistributed ? <Badge variant="outline">Sudah Disalurkan</Badge> : <Badge variant="secondary">Belum</Badge>}
                             </TableCell>
                           </TableRow>
                         );
@@ -640,30 +609,25 @@ export default function Distribution() {
               </Card>
             )}
 
-            {/* Beneficiaries Section */}
             {previewCalc.beneficiaries.length > 0 && (
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2">
+                  <CardTitle className="flex items-center gap-2 text-sm">
                     <Users className="h-4 w-4" />
-                    Mustahik ({previewCategory.includes("zakat") ? "87.5%" : "100%"} = {
-                      previewCategory.includes("cash") || previewCategory === "zakat_mal"
-                        ? formatCurrency(previewCalc.beneficiaryTotal)
-                        : `${previewCalc.beneficiaryTotal.toFixed(2)} kg`
-                    })
+                    Mustahik ({previewBeneficiaryPercent.toFixed(1)}% = {previewCategory.includes("cash") || previewCategory === "zakat_mal"
+                      ? formatCurrency(previewCalc.beneficiaryTotal)
+                      : `${previewCalc.beneficiaryTotal.toFixed(2)} kg`})
                   </CardTitle>
                   <CardDescription>
-                    Distribusi berdasarkan prioritas dan jumlah anggota keluarga
+                    {amilDistributionMode === "proportional_with_factor"
+                      ? "Sisa dana setelah porsi amil akan dibagi rata ke mustahik non-amil."
+                      : "Pembagian mustahik non-amil berdasarkan prioritas dan jumlah keluarga."}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="mb-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => selectAll(previewCalc.beneficiaries)}
-                    >
-                      Pilih Semua yang Belum
+                    <Button variant="outline" size="sm" onClick={() => selectAll(previewCalc.beneficiaries)}>
+                      Pilih Semua yang Belum Disalurkan
                     </Button>
                   </div>
                   <Table>
@@ -671,16 +635,16 @@ export default function Distribution() {
                       <TableRow>
                         <TableHead className="w-12">
                           <Checkbox
-                            checked={previewCalc.beneficiaries.every(b => selectedRecipients.has(b.mustahikId) || distributedIds.has(b.mustahikId))}
+                            checked={previewCalc.beneficiaries.every((b) => selectedRecipients.has(b.mustahikId) || distributedIds.has(b.mustahikId))}
                             onCheckedChange={() => {
-                              const eligible = previewCalc.beneficiaries.filter(b => !distributedIds.has(b.mustahikId));
-                              if (eligible.every(b => selectedRecipients.has(b.mustahikId))) {
+                              const eligible = previewCalc.beneficiaries.filter((b) => !distributedIds.has(b.mustahikId));
+                              if (eligible.every((b) => selectedRecipients.has(b.mustahikId))) {
                                 const newSet = new Set(selectedRecipients);
-                                eligible.forEach(b => newSet.delete(b.mustahikId));
+                                eligible.forEach((b) => newSet.delete(b.mustahikId));
                                 setSelectedRecipients(newSet);
                               } else {
                                 const newSet = new Set(selectedRecipients);
-                                eligible.forEach(b => newSet.add(b.mustahikId));
+                                eligible.forEach((b) => newSet.add(b.mustahikId));
                                 setSelectedRecipients(newSet);
                               }
                             }}
@@ -694,7 +658,7 @@ export default function Distribution() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {previewCalc.beneficiaries.map(b => {
+                      {previewCalc.beneficiaries.map((b) => {
                         const isDistributed = distributedIds.has(b.mustahikId);
                         return (
                           <TableRow key={b.mustahikId} className={isDistributed ? "opacity-50" : ""}>
@@ -716,11 +680,7 @@ export default function Distribution() {
                               {b.cashAmount > 0 ? formatCurrency(b.cashAmount) : `${b.riceAmount || b.foodAmount} kg`}
                             </TableCell>
                             <TableCell>
-                              {isDistributed ? (
-                                <Badge variant="outline">Sudah Disalurkan</Badge>
-                              ) : (
-                                <Badge variant="secondary">Belum</Badge>
-                              )}
+                              {isDistributed ? <Badge variant="outline">Sudah Disalurkan</Badge> : <Badge variant="secondary">Belum</Badge>}
                             </TableCell>
                           </TableRow>
                         );
@@ -732,9 +692,7 @@ export default function Distribution() {
             )}
 
             {previewCalc.amil.length === 0 && previewCalc.beneficiaries.length === 0 && (
-              <p className="text-muted-foreground text-center py-8">
-                Tidak ada penerima yang eligible atau saldo dana kosong
-              </p>
+              <p className="py-8 text-center text-muted-foreground">Tidak ada penerima yang layak terima atau saldo dana kosong.</p>
             )}
           </div>
 
@@ -746,17 +704,16 @@ export default function Distribution() {
               onClick={() => batchDistributeMutation.mutate()}
               disabled={selectedRecipients.size === 0 || batchDistributeMutation.isPending}
             >
-              Distribusikan ({selectedRecipients.size} penerima)
+              Salurkan ({selectedRecipients.size} penerima)
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* View Distribution Detail */}
       <Dialog open={!!viewingDistribution} onOpenChange={() => setViewingDistribution(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Detail Distribusi</DialogTitle>
+            <DialogTitle>Detail Pendistribusian</DialogTitle>
           </DialogHeader>
           {viewingDistribution && (
             <div className="space-y-4">
@@ -785,8 +742,8 @@ export default function Distribution() {
                     {viewingDistribution.fund_category.includes("cash") || viewingDistribution.fund_category === "zakat_mal"
                       ? formatCurrency(viewingDistribution.cash_amount || 0)
                       : viewingDistribution.fund_category.includes("rice")
-                      ? `${viewingDistribution.rice_amount_kg || 0} kg`
-                      : `${viewingDistribution.food_amount_kg || 0} kg`}
+                        ? `${viewingDistribution.rice_amount_kg || 0} kg`
+                        : `${viewingDistribution.food_amount_kg || 0} kg`}
                   </p>
                 </div>
                 <div>

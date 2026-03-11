@@ -17,6 +17,8 @@ interface Period {
   fidyah_daily_rate: number | null;
   nisab_gold_price_per_gram: number | null;
   nisab_silver_price_per_gram: number | null;
+  amil_distribution_mode: "percentage" | "proportional_with_factor" | null;
+  amil_share_factor: number | null;
 }
 
 interface PeriodContextType {

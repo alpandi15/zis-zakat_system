@@ -40,6 +40,7 @@ import {
   Shield,
   Lock,
   UserCog,
+  Calculator,
 } from "lucide-react";
 
 interface NavItem {
@@ -72,7 +73,8 @@ const transactionNavItems = [
   { title: "Zakat Fitrah", url: "/zakat-fitrah", icon: Wheat },
   { title: "Zakat Mal", url: "/zakat-mal", icon: Coins },
   { title: "Fidyah", url: "/fidyah", icon: Heart },
-  { title: "Distribusi", url: "/distribution", icon: Package },
+  { title: "Perhitungan", url: "/calculations", icon: Calculator },
+  { title: "Pendistribusian", url: "/distribution", icon: Package },
 ];
 
 const reportNavItems = [

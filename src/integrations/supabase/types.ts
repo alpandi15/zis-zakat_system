@@ -515,6 +515,8 @@ export type Database = {
       }
       periods: {
         Row: {
+          amil_distribution_mode: string
+          amil_share_factor: number
           archived_at: string | null
           archived_by: string | null
           cash_amount_per_person: number | null
@@ -535,6 +537,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          amil_distribution_mode?: string
+          amil_share_factor?: number
           archived_at?: string | null
           archived_by?: string | null
           cash_amount_per_person?: number | null
@@ -555,6 +559,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          amil_distribution_mode?: string
+          amil_share_factor?: number
           archived_at?: string | null
           archived_by?: string | null
           cash_amount_per_person?: number | null

@@ -4,6 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
 import { CurrencyInput } from "@/components/shared/CurrencyInput";
+import {
+  MuzakkiMemberSearchSelect,
+  type MuzakkiMemberOption,
+} from "@/components/shared/MuzakkiMemberSearchSelect";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +33,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -82,14 +85,6 @@ interface Transaction {
   muzakki_member?: { name: string; relationship: "head_of_family" | "wife" | "child" | "parent" } | null;
 }
 
-interface MuzakkiMemberOption {
-  id: string;
-  name: string;
-  relationship: "head_of_family" | "wife" | "child" | "parent";
-  muzakki_id: string;
-  muzakki?: { name: string } | null;
-}
-
 export default function ZakatMal() {
   const { isReadOnly, selectedPeriod } = usePeriod();
   const { toast } = useToast();
@@ -100,6 +95,7 @@ export default function ZakatMal() {
 
   // Form state
   const [selectedMemberId, setSelectedMemberId] = useState("");
+  const [selectedPayerMember, setSelectedPayerMember] = useState<MuzakkiMemberOption | null>(null);
   const [zakatType, setZakatType] = useState<"income" | "gold" | "trade">("income");
   const [calculationMode, setCalculationMode] = useState<CalculationMode>("from_assets");
   const [grossAmount, setGrossAmount] = useState(0);
@@ -150,27 +146,11 @@ export default function ZakatMal() {
     enabled: !!selectedPeriod?.id,
   });
 
-  // Fetch active family members for payer selection
-  const { data: muzakkiMembers = [] } = useQuery({
-    queryKey: ["muzakki-members-active-for-zakat-mal"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("muzakki_members")
-        .select("id, name, relationship, muzakki_id, muzakki:muzakki_id(name)")
-        .eq("is_active", true)
-        .order("name");
-      if (error) throw error;
-      return data as MuzakkiMemberOption[];
-    },
-  });
-
-  const selectedMember = muzakkiMembers.find((m) => m.id === selectedMemberId) || null;
-
   // Create transaction mutation
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!selectedPeriod?.id) throw new Error("Periode tidak dipilih");
-      if (!selectedMember) throw new Error("Pilih anggota muzakki");
+      if (!selectedMemberId || !selectedPayerMember) throw new Error("Pilih anggota pembayar");
       if (calculationMode === "from_assets" && grossAmount <= 0) throw new Error("Jumlah harta harus lebih dari 0");
       if (calculationMode === "from_zakat" && directZakatInput <= 0) throw new Error("Jumlah zakat harus lebih dari 0");
 
@@ -178,8 +158,8 @@ export default function ZakatMal() {
       const { data: transaction, error: txError } = await supabase
         .from("zakat_mal_transactions")
         .insert({
-          muzakki_id: selectedMember.muzakki_id,
-          muzakki_member_id: selectedMember.id,
+          muzakki_id: selectedPayerMember.muzakki_id,
+          muzakki_member_id: selectedPayerMember.id,
           period_id: selectedPeriod.id,
           zakat_type: zakatType,
           gross_amount: displayGrossAmount,
@@ -212,7 +192,7 @@ export default function ZakatMal() {
             amount_rice_kg: 0,
             reference_id: transaction.id,
             reference_type: "zakat_mal_transactions",
-            description: `Zakat Mal (${ZAKAT_TYPE_LABELS[zakatType]}) dari ${selectedMember.name}`,
+            description: `Zakat Mal (${ZAKAT_TYPE_LABELS[zakatType]}) dari ${selectedPayerMember.name}`,
           });
 
         if (ledgerError) throw ledgerError;
@@ -234,6 +214,7 @@ export default function ZakatMal() {
 
   const resetForm = () => {
     setSelectedMemberId("");
+    setSelectedPayerMember(null);
     setZakatType("income");
     setCalculationMode("from_assets");
     setGrossAmount(0);
@@ -359,18 +340,23 @@ export default function ZakatMal() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Anggota Pembayar *</Label>
-                <Select value={selectedMemberId} onValueChange={setSelectedMemberId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih anggota muzakki" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {muzakkiMembers.map((member) => (
-                      <SelectItem key={member.id} value={member.id}>
-                        {member.name} - {RELATIONSHIP_LABELS[member.relationship]} ({member.muzakki?.name || "Tanpa KK"})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <MuzakkiMemberSearchSelect
+                  value={selectedMemberId}
+                  onChange={(value, selected) => {
+                    setSelectedMemberId(value);
+                    setSelectedPayerMember(selected);
+                  }}
+                  placeholder="Cari anggota atau tambah muzakki baru..."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Pencarian langsung ke tabel anggota (`muzakki_members`). Jika belum ada, pilih Tambah Muzakki Baru.
+                </p>
+                {selectedPayerMember && (
+                  <p className="text-xs text-muted-foreground">
+                    KK: {selectedPayerMember.muzakki?.name || "Tanpa KK"} • Hubungan:{" "}
+                    {RELATIONSHIP_LABELS[selectedPayerMember.relationship]}
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Jenis Zakat *</Label>

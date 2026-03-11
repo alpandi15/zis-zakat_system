@@ -114,7 +114,7 @@ export function DataTable<T extends { id: string }>({
             <p className="text-muted-foreground">{emptyMessage}</p>
           </div>
         ) : (
-          <div className="rounded-xl border border-border/70">
+          <div className="rounded-xl">
             <Table className="min-w-[720px]">
               <TableHeader>
                 <TableRow>

@@ -20,11 +20,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Eye, FileText, AlertCircle } from "lucide-react";
 import { formatCurrency } from "@/lib/formatCurrency";
-import { useDistributionCalculation } from "@/hooks/useDistributionCalculation";
+import { useDistributionCalculation, type AmilDistributionMode } from "@/hooks/useDistributionCalculation";
 import { useAsnafSettings } from "@/hooks/useAsnafSettings";
 
 interface DistributionPreviewTabProps {
   periodId: string;
+  amilDistributionMode: AmilDistributionMode;
+  amilShareFactor: number;
 }
 
 interface RecipientPreview {
@@ -44,7 +46,11 @@ interface RecipientPreview {
   };
 }
 
-export function DistributionPreviewTab({ periodId }: DistributionPreviewTabProps) {
+export function DistributionPreviewTab({
+  periodId,
+  amilDistributionMode,
+  amilShareFactor,
+}: DistributionPreviewTabProps) {
   const [selectedRecipient, setSelectedRecipient] = useState<RecipientPreview | null>(null);
   const { getLabel } = useAsnafSettings();
 
@@ -117,7 +123,11 @@ export function DistributionPreviewTab({ periodId }: DistributionPreviewTabProps
   const calculations = useDistributionCalculation(
     mustahikList,
     fundBalances,
-    allExistingDistributions
+    allExistingDistributions,
+    {
+      amilDistributionMode,
+      amilShareFactor,
+    }
   );
 
   // Build preview data
@@ -226,8 +236,13 @@ export function DistributionPreviewTab({ periodId }: DistributionPreviewTabProps
       <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300">
         <AlertCircle className="h-4 w-4 flex-shrink-0" />
         <p>
-          Data ini adalah <strong>preview</strong> jumlah yang akan didistribusikan, berdasarkan saldo dana saat ini. 
-          Data bersifat read-only dan tidak mempengaruhi status distribusi.
+          Data ini adalah <strong>simulasi</strong> jumlah yang akan dialokasikan, berdasarkan saldo dana saat ini.
+          Data bersifat baca-saja dan tidak mengubah status pendistribusian. Mode porsi amil:{" "}
+          <strong>
+            {amilDistributionMode === "percentage"
+              ? `Persentase Tetap (${(calculations.configuration.amilPercentage * 100).toFixed(1)}%)`
+              : `Rasio x Faktor (${(calculations.configuration.amilShareFactor * 100).toFixed(0)}%)`}
+          </strong>.
         </p>
       </div>
 
@@ -283,7 +298,7 @@ export function DistributionPreviewTab({ periodId }: DistributionPreviewTabProps
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <FileText className="h-4 w-4" />
-            Rincian per Sumber Dana (Proyeksi)
+            Rincian per Sumber Dana (Simulasi)
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -315,15 +330,15 @@ export function DistributionPreviewTab({ periodId }: DistributionPreviewTabProps
       {/* Per-Recipient Table */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Daftar Penerima (Proyeksi)</CardTitle>
-          <CardDescription>
-            Preview total yang akan diterima setiap penerima sebelum distribusi dilakukan.
-          </CardDescription>
+        <CardTitle className="text-base">Daftar Penerima (Simulasi)</CardTitle>
+        <CardDescription>
+            Simulasi total yang akan diterima setiap penerima sebelum pendistribusian dilakukan.
+        </CardDescription>
         </CardHeader>
         <CardContent>
           {previewData.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">
-              Tidak ada penerima eligible atau saldo dana kosong
+              Tidak ada penerima yang layak terima atau saldo dana kosong
             </p>
           ) : (
             <Table>
@@ -376,7 +391,7 @@ export function DistributionPreviewTab({ periodId }: DistributionPreviewTabProps
       <Dialog open={!!selectedRecipient} onOpenChange={() => setSelectedRecipient(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Detail Proyeksi - {selectedRecipient?.name}</DialogTitle>
+            <DialogTitle>Rincian Simulasi - {selectedRecipient?.name}</DialogTitle>
           </DialogHeader>
           {selectedRecipient && (
             <div className="space-y-4">
@@ -385,7 +400,9 @@ export function DistributionPreviewTab({ periodId }: DistributionPreviewTabProps
                   {getLabel(selectedRecipient.asnaf)}
                 </Badge>
                 {selectedRecipient.isAmil && (
-                  <span className="text-xs text-muted-foreground">(Menerima 12.5% dari total)</span>
+                  <span className="text-xs text-muted-foreground">
+                    (Porsi amil mengikuti mode simulasi alokasi aktif)
+                  </span>
                 )}
               </div>
               

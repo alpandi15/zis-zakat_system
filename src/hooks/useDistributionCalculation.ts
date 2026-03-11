@@ -34,6 +34,13 @@ interface CategoryDistribution {
   beneficiaryTotal: number;
 }
 
+export type AmilDistributionMode = "percentage" | "proportional_with_factor";
+
+interface DistributionCalculationOptions {
+  amilDistributionMode?: AmilDistributionMode;
+  amilShareFactor?: number;
+}
+
 // Distribution priority weights
 const PRIORITY_WEIGHTS: Record<string, number> = {
   urgent: 4,
@@ -45,7 +52,8 @@ const PRIORITY_WEIGHTS: Record<string, number> = {
 export function useDistributionCalculation(
   mustahikList: Mustahik[],
   fundBalances: FundBalance[],
-  existingDistributions: { mustahik_id: string; fund_category: string; status: string }[]
+  existingDistributions: { mustahik_id: string; fund_category: string; status: string }[],
+  options?: DistributionCalculationOptions
 ) {
   const { asnafSettings } = useAsnafSettings();
 
@@ -66,6 +74,8 @@ export function useDistributionCalculation(
     // Get Amil percentage from settings (default 12.5%)
     const amilSetting = asnafSettings.find(s => s.asnaf_code === "amil");
     const AMIL_PERCENTAGE = (amilSetting?.distribution_percentage || 12.5) / 100;
+    const amilDistributionMode: AmilDistributionMode = options?.amilDistributionMode || "percentage";
+    const amilShareFactor = Math.max(0, Math.min(1, options?.amilShareFactor ?? 0.5));
 
     // Separate Amil from other mustahik
     const amilList = mustahikList.filter(m => getAsnafCode(m) === "amil");
@@ -113,6 +123,37 @@ export function useDistributionCalculation(
       return balance || { total_cash: 0, total_rice_kg: 0, total_food_kg: 0 };
     };
 
+    const calculateAmilAndBeneficiaryPortions = (
+      totalAmount: number,
+      amilCount: number,
+      beneficiaryCount: number
+    ) => {
+      if (totalAmount <= 0) {
+        return { amilPortion: 0, beneficiaryPortion: 0 };
+      }
+      if (amilCount === 0) {
+        return { amilPortion: 0, beneficiaryPortion: totalAmount };
+      }
+      if (beneficiaryCount === 0) {
+        return { amilPortion: totalAmount, beneficiaryPortion: 0 };
+      }
+
+      if (amilDistributionMode === "proportional_with_factor") {
+        const proportionalPortion = totalAmount * (amilCount / (amilCount + beneficiaryCount));
+        const amilPortion = proportionalPortion * amilShareFactor;
+        return {
+          amilPortion,
+          beneficiaryPortion: totalAmount - amilPortion,
+        };
+      }
+
+      const amilPortion = totalAmount * AMIL_PERCENTAGE;
+      return {
+        amilPortion,
+        beneficiaryPortion: totalAmount - amilPortion,
+      };
+    };
+
     // Helper to calculate weighted distribution
     const distributeByWeight = (
       list: Mustahik[],
@@ -141,6 +182,46 @@ export function useDistributionCalculation(
       });
     };
 
+    const distributeEqually = (
+      list: Mustahik[],
+      totalAmount: number,
+      amountType: "cash" | "rice" | "food"
+    ): DistributionResult[] => {
+      if (list.length === 0 || totalAmount <= 0) return [];
+
+      if (amountType === "cash") {
+        const count = list.length;
+        const base = Math.floor(totalAmount / count);
+        const remainder = Math.max(0, Math.round(totalAmount - base * count));
+        return list.map((b, idx) => ({
+          mustahikId: b.id,
+          name: b.name,
+          asnaf: getAsnafCode(b),
+          priority: b.priority,
+          cashAmount: base + (idx < remainder ? 1 : 0),
+          riceAmount: 0,
+          foodAmount: 0,
+        }));
+      }
+
+      const count = list.length;
+      const evenAmount = Number((totalAmount / count).toFixed(2));
+      return list.map((b, idx) => {
+        const nonFinalTotal = evenAmount * (count - 1);
+        const finalAmount = Number((totalAmount - nonFinalTotal).toFixed(2));
+        const share = idx === count - 1 ? finalAmount : evenAmount;
+        return {
+          mustahikId: b.id,
+          name: b.name,
+          asnaf: getAsnafCode(b),
+          priority: b.priority,
+          cashAmount: 0,
+          riceAmount: amountType === "rice" ? share : 0,
+          foodAmount: amountType === "food" ? share : 0,
+        };
+      });
+    };
+
     // Calculate distribution for zakat fitrah (cash)
     const calculateZakatFitrahCash = (): CategoryDistribution => {
       const balance = getAvailableBalance("zakat_fitrah_cash");
@@ -155,9 +236,11 @@ export function useDistributionCalculation(
         return { amil: [], beneficiaries: [], amilTotal: 0, beneficiaryTotal: 0 };
       }
 
-      // Calculate Amil portion based on settings
-      const amilPortion = totalCash * AMIL_PERCENTAGE;
-      const beneficiaryPortion = totalCash - amilPortion;
+      const { amilPortion, beneficiaryPortion } = calculateAmilAndBeneficiaryPortions(
+        totalCash,
+        eligibleAmil.length,
+        eligibleBeneficiaries.length
+      );
 
       // Distribute to Amil equally
       const amilAmount = eligibleAmil.length > 0 ? amilPortion / eligibleAmil.length : 0;
@@ -171,7 +254,10 @@ export function useDistributionCalculation(
         foodAmount: 0,
       }));
 
-      const beneficiaryDistribution = distributeByWeight(eligibleBeneficiaries, beneficiaryPortion, "cash");
+      const beneficiaryDistribution =
+        amilDistributionMode === "proportional_with_factor"
+          ? distributeEqually(eligibleBeneficiaries, beneficiaryPortion, "cash")
+          : distributeByWeight(eligibleBeneficiaries, beneficiaryPortion, "cash");
 
       return {
         amil: amilDistribution,
@@ -194,8 +280,11 @@ export function useDistributionCalculation(
         return { amil: [], beneficiaries: [], amilTotal: 0, beneficiaryTotal: 0 };
       }
 
-      const amilPortion = totalRice * AMIL_PERCENTAGE;
-      const beneficiaryPortion = totalRice - amilPortion;
+      const { amilPortion, beneficiaryPortion } = calculateAmilAndBeneficiaryPortions(
+        totalRice,
+        eligibleAmil.length,
+        eligibleBeneficiaries.length
+      );
 
       const amilAmount = eligibleAmil.length > 0 ? amilPortion / eligibleAmil.length : 0;
       const amilDistribution = eligibleAmil.map(a => ({
@@ -208,7 +297,10 @@ export function useDistributionCalculation(
         foodAmount: 0,
       }));
 
-      const beneficiaryDistribution = distributeByWeight(eligibleBeneficiaries, beneficiaryPortion, "rice");
+      const beneficiaryDistribution =
+        amilDistributionMode === "proportional_with_factor"
+          ? distributeEqually(eligibleBeneficiaries, beneficiaryPortion, "rice")
+          : distributeByWeight(eligibleBeneficiaries, beneficiaryPortion, "rice");
 
       return {
         amil: amilDistribution,
@@ -231,8 +323,11 @@ export function useDistributionCalculation(
         return { amil: [], beneficiaries: [], amilTotal: 0, beneficiaryTotal: 0 };
       }
 
-      const amilPortion = totalCash * AMIL_PERCENTAGE;
-      const beneficiaryPortion = totalCash - amilPortion;
+      const { amilPortion, beneficiaryPortion } = calculateAmilAndBeneficiaryPortions(
+        totalCash,
+        eligibleAmil.length,
+        eligibleBeneficiaries.length
+      );
 
       const amilAmount = eligibleAmil.length > 0 ? amilPortion / eligibleAmil.length : 0;
       const amilDistribution = eligibleAmil.map(a => ({
@@ -245,7 +340,10 @@ export function useDistributionCalculation(
         foodAmount: 0,
       }));
 
-      const beneficiaryDistribution = distributeByWeight(eligibleBeneficiaries, beneficiaryPortion, "cash");
+      const beneficiaryDistribution =
+        amilDistributionMode === "proportional_with_factor"
+          ? distributeEqually(eligibleBeneficiaries, beneficiaryPortion, "cash")
+          : distributeByWeight(eligibleBeneficiaries, beneficiaryPortion, "cash");
 
       return {
         amil: amilDistribution,
@@ -310,6 +408,11 @@ export function useDistributionCalculation(
       beneficiaryList,
       asnafSettings,
       eligibilityMap: eligibilityMapByCode,
+      configuration: {
+        amilDistributionMode,
+        amilShareFactor,
+        amilPercentage: AMIL_PERCENTAGE,
+      },
     };
-  }, [mustahikList, fundBalances, existingDistributions, asnafSettings]);
+  }, [mustahikList, fundBalances, existingDistributions, asnafSettings, options?.amilDistributionMode, options?.amilShareFactor]);
 }

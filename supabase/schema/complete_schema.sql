@@ -148,11 +148,17 @@ CREATE TABLE public.periods (
   fidyah_daily_rate NUMERIC DEFAULT 35000,
   nisab_gold_price_per_gram NUMERIC DEFAULT 1200000,
   nisab_silver_price_per_gram NUMERIC DEFAULT 15000,
+  amil_distribution_mode TEXT NOT NULL DEFAULT 'percentage',
+  amil_share_factor NUMERIC NOT NULL DEFAULT 0.5,
   archived_at TIMESTAMP WITH TIME ZONE,
   archived_by UUID REFERENCES auth.users(id),
   created_by UUID REFERENCES auth.users(id),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  CONSTRAINT periods_amil_distribution_mode_check
+    CHECK (amil_distribution_mode IN ('percentage', 'proportional_with_factor')),
+  CONSTRAINT periods_amil_share_factor_check
+    CHECK (amil_share_factor >= 0 AND amil_share_factor <= 1)
 );
 
 -- Muzakki (zakat payers) table
