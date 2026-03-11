@@ -204,13 +204,13 @@ export function MuzakkiMemberSearchSelect({
             role="combobox"
             aria-expanded={open}
             disabled={disabled}
-            className="w-full justify-between font-normal"
+            className="h-9 w-full justify-between truncate font-normal text-left text-[13px] sm:h-10 sm:text-sm"
           >
             {selected ? selected.name : placeholder}
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[420px] p-0" align="start">
+        <PopoverContent className="w-[min(420px,calc(100vw-1rem))] p-0" align="start">
           <Command shouldFilter={false}>
             <CommandInput
               placeholder="Cari nama anggota / muzakki / telepon..."
@@ -266,12 +266,12 @@ export function MuzakkiMemberSearchSelect({
           setIsCreateOpen(openState);
         }}
       >
-        <DialogContent className="max-w-xl max-h-[88vh] overflow-y-auto">
+        <DialogContent className="max-h-[90dvh] w-[calc(100vw-0.9rem)] max-w-xl overflow-y-auto p-3 sm:p-5">
           <DialogHeader>
             <DialogTitle>Tambah Muzakki Baru (Pembayar Fidyah)</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleCreateSubmit} className="space-y-4">
-            <div className="space-y-3 rounded-lg border p-4">
+          <form onSubmit={handleCreateSubmit} className="space-y-3 sm:space-y-4">
+            <div className="space-y-2.5 rounded-xl border p-3 sm:space-y-3 sm:p-4">
               <h4 className="text-sm font-medium">Data Muzakki</h4>
               <div className="space-y-2">
                 <Label htmlFor="new_muzakki_name">Nama Muzakki *</Label>
@@ -283,7 +283,7 @@ export function MuzakkiMemberSearchSelect({
                   required
                 />
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="new_muzakki_phone">No. Telepon</Label>
                   <Input
@@ -336,7 +336,7 @@ export function MuzakkiMemberSearchSelect({
               </div>
             </div>
 
-            <div className="space-y-3 rounded-lg border p-4">
+            <div className="space-y-2.5 rounded-xl border p-3 sm:space-y-3 sm:p-4">
               <h4 className="text-sm font-medium">Data Anggota Pembayar</h4>
               <div className="space-y-2">
                 <Label htmlFor="new_member_name">Nama Anggota Pembayar *</Label>
@@ -348,7 +348,7 @@ export function MuzakkiMemberSearchSelect({
                   required
                 />
               </div>
-              <div className="flex items-center justify-between rounded-md border p-3">
+              <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
                 <div>
                   <Label htmlFor="new_member_is_dependent">Termasuk Tanggungan</Label>
                   <p className="text-xs text-muted-foreground">Berguna untuk transaksi zakat fitrah.</p>
@@ -370,11 +370,11 @@ export function MuzakkiMemberSearchSelect({
               </div>
             </div>
 
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)} className="w-full sm:w-auto">
                 Batal
               </Button>
-              <Button type="submit" disabled={createMutation.isPending}>
+              <Button type="submit" disabled={createMutation.isPending} className="w-full sm:w-auto">
                 {createMutation.isPending ? "Menyimpan..." : "Simpan & Pilih"}
               </Button>
             </div>

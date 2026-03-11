@@ -613,10 +613,13 @@ export default function ZakatFitrah() {
     <AppLayout title="Zakat Fitrah">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
-      <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold">
-            Transaksi Zakat Fitrah - {selectedPeriod?.name || "Pilih Periode"}
+      <div className="space-y-3 sm:space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-base font-semibold leading-tight sm:text-lg">
+            <span className="block">Transaksi Zakat Fitrah</span>
+            <span className="mt-1 block text-xs font-medium text-muted-foreground sm:text-sm">
+              {selectedPeriod?.name || "Pilih Periode"}
+            </span>
           </h2>
           {!isReadOnly && selectedPeriod && (
             <Button
@@ -624,7 +627,7 @@ export default function ZakatFitrah() {
                 resetForm();
                 setIsFormOpen(true);
               }}
-              className="gap-2"
+              className="h-9 w-full gap-2 text-xs sm:h-10 sm:w-auto sm:text-sm"
             >
               <Plus className="h-4 w-4" />
               Tambah Transaksi
@@ -633,7 +636,7 @@ export default function ZakatFitrah() {
         </div>
 
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="pt-4 sm:pt-6">
             {isLoading ? (
               <p className="text-muted-foreground text-center py-8">Memuat data...</p>
             ) : transactions.length === 0 ? (
@@ -641,7 +644,7 @@ export default function ZakatFitrah() {
                 Belum ada transaksi zakat fitrah untuk periode ini
               </p>
             ) : (
-              <Table>
+              <Table className="min-w-[860px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>No. Transaksi</TableHead>
@@ -661,7 +664,7 @@ export default function ZakatFitrah() {
                       <TableCell className="font-mono text-xs">
                         {tx.transaction_no ? `ZF-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="whitespace-nowrap">
                         {format(new Date(tx.transaction_date), "dd MMM yyyy", { locale: idLocale })}
                       </TableCell>
                       <TableCell className="font-medium">{tx.muzakki?.name}</TableCell>
@@ -686,13 +689,13 @@ export default function ZakatFitrah() {
                           <Badge variant="outline">Editable</Badge>
                         )}
                       </TableCell>
-                      <TableCell>{tx.total_members} orang</TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="whitespace-nowrap">{tx.total_members} orang</TableCell>
+                      <TableCell className="whitespace-nowrap text-right">
                         {tx.payment_type === "rice"
                           ? `${tx.rice_amount_kg} kg`
                           : formatCurrency(tx.money_amount || 0)}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{getCreatorName(tx.created_by)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground sm:text-sm">{getCreatorName(tx.created_by)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
                           <Button

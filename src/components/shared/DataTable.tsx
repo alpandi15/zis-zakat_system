@@ -64,10 +64,10 @@ export function DataTable<T extends { id: string }>({
 
   return (
     <Card className="border-border/60 bg-card/80 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/70">
-      <CardHeader className="flex flex-col gap-4 pb-4 lg:flex-row lg:items-center lg:justify-between">
+      <CardHeader className="flex flex-col gap-3 pb-3 sm:gap-4 sm:pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-1">
-          <CardTitle className="text-lg">{title}</CardTitle>
-          <p className="text-xs text-muted-foreground">
+          <CardTitle className="text-base sm:text-lg">{title}</CardTitle>
+          <p className="text-[11px] text-muted-foreground sm:text-xs">
             Menampilkan {filteredData.length} dari {data.length} data
           </p>
         </div>
@@ -80,24 +80,24 @@ export function DataTable<T extends { id: string }>({
                 placeholder={searchPlaceholder}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-9 w-full pl-9 sm:w-[220px]"
+                className="h-8 w-full pl-9 text-xs sm:h-9 sm:w-[220px] sm:text-sm"
               />
             </div>
           )}
           {onExportPDF && (
-            <Button variant="outline" size="sm" className="h-9" onClick={onExportPDF}>
+            <Button variant="outline" size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onExportPDF}>
               <FileText className="mr-2 h-4 w-4" />
               PDF
             </Button>
           )}
           {onExportExcel && (
-            <Button variant="outline" size="sm" className="h-9" onClick={onExportExcel}>
+            <Button variant="outline" size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onExportExcel}>
               <FileSpreadsheet className="mr-2 h-4 w-4" />
               Excel
             </Button>
           )}
           {onAdd && !isReadOnly && (
-            <Button size="sm" className="h-9" onClick={onAdd}>
+            <Button size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onAdd}>
               <Plus className="mr-2 h-4 w-4" />
               {addLabel}
             </Button>
@@ -115,7 +115,7 @@ export function DataTable<T extends { id: string }>({
           </div>
         ) : (
           <div className="rounded-xl">
-            <Table className="min-w-[720px]">
+            <Table className="min-w-[640px] sm:min-w-[720px]">
               <TableHeader>
                 <TableRow>
                   {columns.map((column) => (

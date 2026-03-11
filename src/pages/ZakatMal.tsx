@@ -497,10 +497,13 @@ export default function ZakatMal() {
     <AppLayout title="Zakat Mal">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
-      <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold">
-            Transaksi Zakat Mal - {selectedPeriod?.name || "Pilih Periode"}
+      <div className="space-y-3 sm:space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-base font-semibold leading-tight sm:text-lg">
+            <span className="block">Transaksi Zakat Mal</span>
+            <span className="mt-1 block text-xs font-medium text-muted-foreground sm:text-sm">
+              {selectedPeriod?.name || "Pilih Periode"}
+            </span>
           </h2>
           {!isReadOnly && selectedPeriod && (
             <Button
@@ -508,7 +511,7 @@ export default function ZakatMal() {
                 resetForm();
                 setIsFormOpen(true);
               }}
-              className="gap-2"
+              className="h-9 w-full gap-2 text-xs sm:h-10 sm:w-auto sm:text-sm"
             >
               <Plus className="h-4 w-4" />
               Tambah Transaksi
@@ -517,7 +520,7 @@ export default function ZakatMal() {
         </div>
 
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="pt-4 sm:pt-6">
             {isLoading ? (
               <p className="text-muted-foreground text-center py-8">Memuat data...</p>
             ) : transactions.length === 0 ? (
@@ -525,7 +528,7 @@ export default function ZakatMal() {
                 Belum ada transaksi zakat mal untuk periode ini
               </p>
             ) : (
-              <Table>
+              <Table className="min-w-[920px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>No. Transaksi</TableHead>
@@ -545,7 +548,7 @@ export default function ZakatMal() {
                       <TableCell className="font-mono text-xs">
                         {tx.transaction_no ? `ZM-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="whitespace-nowrap">
                         {format(new Date(tx.transaction_date), "dd MMM yyyy", { locale: idLocale })}
                       </TableCell>
                       <TableCell>
@@ -581,13 +584,13 @@ export default function ZakatMal() {
                           <Badge variant="outline">Editable</Badge>
                         )}
                       </TableCell>
-                      <TableCell className="text-right font-medium">
+                      <TableCell className="whitespace-nowrap text-right font-medium">
                         {formatCurrency(tx.final_zakat_amount)}
                         {tx.is_manually_overridden && (
                           <span className="text-xs text-muted-foreground ml-1">(Override)</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{getCreatorName(tx.created_by)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground sm:text-sm">{getCreatorName(tx.created_by)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
                           <Button variant="ghost" size="icon" onClick={() => setViewingTransaction(tx)}>

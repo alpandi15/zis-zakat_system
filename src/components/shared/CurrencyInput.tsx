@@ -45,7 +45,7 @@ export function CurrencyInput({
 
   return (
     <div className="relative">
-      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground sm:text-sm">
         Rp
       </span>
       <Input
@@ -57,7 +57,7 @@ export function CurrencyInput({
         onChange={handleChange}
         placeholder={placeholder}
         disabled={disabled}
-        className={cn("pl-10 text-right", className)}
+        className={cn("pl-8 text-right text-sm sm:pl-10", className)}
       />
     </div>
   );

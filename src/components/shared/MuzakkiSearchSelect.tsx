@@ -220,13 +220,13 @@ export function MuzakkiSearchSelect({
             aria-expanded={open}
             disabled={disabled}
             type="button"
-            className="w-full justify-between font-normal"
+            className="h-9 w-full justify-between truncate font-normal text-left text-[13px] sm:h-10 sm:text-sm"
           >
             {selectedMuzakki ? selectedMuzakki.name : placeholder}
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[400px] p-0" align="start">
+        <PopoverContent className="w-[min(420px,calc(100vw-1rem))] p-0" align="start">
           <Command shouldFilter={false}>
             <CommandInput
               placeholder="Cari nama atau telepon..."
@@ -278,7 +278,7 @@ export function MuzakkiSearchSelect({
         if (!open) resetForm();
         setIsCreateOpen(open);
       }}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-h-[90dvh] w-[calc(100vw-0.9rem)] max-w-lg overflow-y-auto p-3 sm:p-5">
           <DialogHeader>
             <DialogTitle>
               {step === 1 ? "Tambah Muzakki Baru" : "Tambah Anggota Keluarga"}
@@ -286,7 +286,7 @@ export function MuzakkiSearchSelect({
           </DialogHeader>
 
           {step === 1 && (
-            <form onSubmit={handleNextStep} className="space-y-4">
+            <form onSubmit={handleNextStep} className="space-y-3 sm:space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Nama Lengkap *</Label>
                 <Input
@@ -316,42 +316,42 @@ export function MuzakkiSearchSelect({
                   rows={2}
                 />
               </div>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)} className="w-full sm:w-auto">
                   Batal
                 </Button>
-                <Button type="submit">Lanjutkan</Button>
+                <Button type="submit" className="w-full sm:w-auto">Lanjutkan</Button>
               </div>
             </form>
           )}
 
           {step === 2 && (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <p className="text-sm text-muted-foreground">
+            <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
+              <p className="text-xs text-muted-foreground sm:text-sm">
                 Tambahkan minimal satu anggota keluarga.
               </p>
-              <div className="space-y-3 max-h-[300px] overflow-y-auto">
+              <div className="space-y-2.5 max-h-[48dvh] overflow-y-auto pr-1 sm:max-h-[300px]">
                 {members.map((member, index) => (
-                  <div key={member.id} className="border rounded-lg p-3 space-y-2">
+                  <div key={member.id} className="space-y-2 rounded-xl border p-2.5 sm:p-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">Anggota {index + 1}</span>
+                      <span className="text-xs font-medium sm:text-sm">Anggota {index + 1}</span>
                       {members.length > 1 && (
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-7 w-7 text-destructive"
+                          className="h-7 w-7 text-destructive sm:h-8 sm:w-8"
                           onClick={() => removeMember(member.id)}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       )}
                     </div>
-	                    <div className="grid gap-2 grid-cols-2">
-	                      <Input
-	                        value={member.name}
-	                        onChange={(e) => updateMember(member.id, "name", e.target.value)}
-	                        placeholder="Nama"
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Input
+                        value={member.name}
+                        onChange={(e) => updateMember(member.id, "name", e.target.value)}
+                        placeholder="Nama"
                       />
                       <Select
                         value={member.relationship}
@@ -366,32 +366,32 @@ export function MuzakkiSearchSelect({
                               {opt.label}
                             </SelectItem>
                           ))}
-	                        </SelectContent>
-	                      </Select>
-	                    </div>
-	                    <div className="flex items-center justify-between rounded-md border p-2">
-	                      <Label className="text-xs">Termasuk Tanggungan</Label>
-	                      <Switch
-	                        checked={member.is_dependent}
-	                        onCheckedChange={(checked) =>
-	                          setMembers((prev) =>
-	                            prev.map((m) => (m.id === member.id ? { ...m, is_dependent: checked } : m))
-	                          )
-	                        }
-	                      />
-	                    </div>
-	                  </div>
-	                ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border px-2.5 py-2">
+                      <Label className="text-[11px] sm:text-xs">Termasuk Tanggungan</Label>
+                      <Switch
+                        checked={member.is_dependent}
+                        onCheckedChange={(checked) =>
+                          setMembers((prev) =>
+                            prev.map((m) => (m.id === member.id ? { ...m, is_dependent: checked } : m))
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
-              <Button type="button" variant="outline" onClick={addMember} className="w-full gap-1">
+              <Button type="button" variant="outline" onClick={addMember} className="h-9 w-full gap-1 text-xs sm:h-10 sm:text-sm">
                 <Plus className="h-4 w-4" />
                 Tambah Anggota
               </Button>
-              <div className="flex justify-between gap-2">
-                <Button type="button" variant="outline" onClick={() => setStep(1)}>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+                <Button type="button" variant="outline" onClick={() => setStep(1)} className="w-full sm:w-auto">
                   Kembali
                 </Button>
-                <Button type="submit" disabled={createMutation.isPending}>
+                <Button type="submit" disabled={createMutation.isPending} className="w-full sm:w-auto">
                   {createMutation.isPending ? "Menyimpan..." : "Simpan & Pilih"}
                 </Button>
               </div>

@@ -88,7 +88,7 @@ const adminNavItems = [
 
 export function AppSidebar() {
   const router = useRouter();
-  const { state } = useSidebar();
+  const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const { profile, signOut, hasRole } = useAuth();
   const { periods, selectedPeriod, setSelectedPeriodId, isReadOnly } = usePeriod();
@@ -97,6 +97,11 @@ export function AppSidebar() {
   const isActive = (path: string) => currentPath === path;
   const isGroupActive = (item: NavItem) =>
     isActive(item.url) || Boolean(item.children?.some((child) => isActive(child.url)));
+  const handleNavigate = () => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  };
 
   const NavItem = ({ item }: { item: NavItem }) => {
     if (item.children && !collapsed) {
@@ -118,11 +123,13 @@ export function AppSidebar() {
               <Link
                 key={child.url}
                 href={child.url}
+                scroll={false}
+                onClick={handleNavigate}
                 className={cn(
-                  "block rounded-lg px-2.5 py-1.5 text-sm transition-colors",
+                  "block rounded-xl px-2.5 py-1.5 text-sm transition-all duration-200",
                   isActive(child.url)
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
+                    ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20"
+                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
                 )}
               >
                 {child.title}
@@ -138,10 +145,13 @@ export function AppSidebar() {
         <SidebarMenuButton asChild>
           <Link
             href={item.url}
+            scroll={false}
+            onClick={handleNavigate}
             className={cn(
-              "flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all",
+              "flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all duration-200",
+              "group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2",
               "hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
-              isGroupActive(item) && "bg-primary text-primary-foreground shadow-sm",
+              isGroupActive(item) && "bg-primary text-primary-foreground shadow-sm shadow-primary/20",
             )}
           >
             <item.icon className="h-4 w-4 shrink-0" />
@@ -153,25 +163,28 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-sidebar-border/80 bg-sidebar/95 backdrop-blur">
-      <SidebarHeader className="border-b border-sidebar-border/80 p-4">
+    <Sidebar
+      collapsible="icon"
+      className="border-r border-sidebar-border/70 bg-[linear-gradient(180deg,hsl(var(--sidebar))/0.98_0%,hsl(var(--sidebar-accent))/0.18_100%)] backdrop-blur-xl"
+    >
+      <SidebarHeader className="border-b border-sidebar-border/70 px-4 pb-4 pt-5">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-cyan-500 text-primary-foreground shadow-md">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-cyan-500 text-primary-foreground shadow-md shadow-primary/25">
             <Shield className="h-5 w-5" />
           </div>
           {!collapsed && (
-            <div className="flex flex-col">
-              <span className="font-semibold text-foreground">Zakatku Console</span>
-              <span className="text-xs text-muted-foreground">Modern ZIS Operation</span>
+            <div className="flex min-w-0 flex-col">
+              <span className="truncate font-semibold text-foreground">Zakatku Console</span>
+              <span className="truncate text-xs text-muted-foreground">Modern ZIS Operation</span>
             </div>
           )}
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="px-2 py-4">
+      <SidebarContent className="px-2.5 py-4">
         {/* Period Selector */}
         {!collapsed && (
-          <div className="mb-4 rounded-xl border border-sidebar-border/80 bg-sidebar-accent/35 p-2.5">
+          <div className="mb-4 rounded-2xl border border-sidebar-border/70 bg-background/55 p-2.5 shadow-sm">
             <div className="flex items-center gap-2 mb-2">
               <Calendar className="h-4 w-4 text-muted-foreground" />
               <span className="text-xs font-medium text-muted-foreground">Periode Aktif</span>
@@ -204,7 +217,7 @@ export function AppSidebar() {
         )}
 
         {/* Main Navigation */}
-        <SidebarGroup>
+        <SidebarGroup className="p-1.5">
           <SidebarGroupLabel className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
             Menu Utama
           </SidebarGroupLabel>
@@ -218,7 +231,7 @@ export function AppSidebar() {
         </SidebarGroup>
 
         {/* Data Management */}
-        <SidebarGroup>
+        <SidebarGroup className="p-1.5">
           <SidebarGroupLabel className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
             Data Master
           </SidebarGroupLabel>
@@ -232,7 +245,7 @@ export function AppSidebar() {
         </SidebarGroup>
 
         {/* Transactions */}
-        <SidebarGroup>
+        <SidebarGroup className="p-1.5">
           <SidebarGroupLabel className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
             Transaksi
           </SidebarGroupLabel>
@@ -246,7 +259,7 @@ export function AppSidebar() {
         </SidebarGroup>
 
         {/* Reports & Settings */}
-        <SidebarGroup>
+        <SidebarGroup className="p-1.5">
           <SidebarGroupLabel className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
             Lainnya
           </SidebarGroupLabel>
@@ -261,7 +274,7 @@ export function AppSidebar() {
 
         {/* Super-admin-equivalent roles */}
         {hasRole('super_admin') && (
-          <SidebarGroup>
+          <SidebarGroup className="p-1.5">
             <SidebarGroupLabel className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
               Administrasi
             </SidebarGroupLabel>
@@ -276,8 +289,8 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border/80 p-4">
-        <div className="flex items-center gap-3 rounded-xl border border-sidebar-border/80 bg-sidebar-accent/35 p-2.5">
+      <SidebarFooter className="border-t border-sidebar-border/70 bg-background/55 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+        <div className="flex items-center gap-3 rounded-2xl border border-sidebar-border/70 bg-sidebar-accent/45 p-2.5">
           <Avatar className="h-9 w-9">
             <AvatarFallback className="bg-primary/10 text-primary text-sm">
               {profile?.full_name?.charAt(0)?.toUpperCase() || "U"}
