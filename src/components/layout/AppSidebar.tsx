@@ -26,10 +26,10 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
+  LucideIcon,
   LayoutDashboard,
   Calendar,
   Users,
-  UserCheck,
   Wheat,
   Coins,
   Heart,
@@ -42,14 +42,28 @@ import {
   UserCog,
 } from "lucide-react";
 
+interface NavItem {
+  title: string;
+  url: string;
+  icon: LucideIcon;
+  children?: Array<{ title: string; url: string }>;
+}
+
 const mainNavItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Periode", url: "/periods", icon: Calendar },
 ];
 
-const dataNavItems = [
-  { title: "Muzakki", url: "/muzakki", icon: Users },
-  { title: "Anggota", url: "/members", icon: UserCheck },
+const dataNavItems: NavItem[] = [
+  {
+    title: "Muzakki",
+    url: "/muzakki",
+    icon: Users,
+    children: [
+      { title: "Data Muzakki", url: "/muzakki" },
+      { title: "Anggota Keluarga", url: "/members" },
+    ],
+  },
   { title: "Mustahik", url: "/mustahik", icon: Heart },
   { title: "Asnaf", url: "/settings/asnaf", icon: Users },
 ];
@@ -79,36 +93,74 @@ export function AppSidebar() {
   const currentPath = router.asPath.split("?")[0];
 
   const isActive = (path: string) => currentPath === path;
+  const isGroupActive = (item: NavItem) =>
+    isActive(item.url) || Boolean(item.children?.some((child) => isActive(child.url)));
 
-  const NavItem = ({ item }: { item: (typeof mainNavItems)[0] }) => (
-    <SidebarMenuItem>
-      <SidebarMenuButton asChild>
-        <Link
-          href={item.url}
-          className={cn(
-            "flex items-center gap-3 rounded-lg px-3 py-2 transition-all",
-            "hover:bg-accent hover:text-accent-foreground",
-            isActive(item.url) && "bg-primary/10 text-primary font-medium"
-          )}
-        >
-          <item.icon className="h-4 w-4 shrink-0" />
-          {!collapsed && <span>{item.title}</span>}
-        </Link>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  );
+  const NavItem = ({ item }: { item: NavItem }) => {
+    if (item.children && !collapsed) {
+      return (
+        <SidebarMenuItem>
+          <div
+            className={cn(
+              "flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all",
+              isGroupActive(item)
+                ? "bg-primary/12 text-primary"
+                : "text-sidebar-foreground/90 hover:bg-sidebar-accent/80",
+            )}
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            <span className="font-medium">{item.title}</span>
+          </div>
+          <div className="ml-[1.65rem] mt-1 space-y-1 border-l border-sidebar-border/80 pl-3">
+            {item.children.map((child) => (
+              <Link
+                key={child.url}
+                href={child.url}
+                className={cn(
+                  "block rounded-lg px-2.5 py-1.5 text-sm transition-colors",
+                  isActive(child.url)
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
+                )}
+              >
+                {child.title}
+              </Link>
+            ))}
+          </div>
+        </SidebarMenuItem>
+      );
+    }
+
+    return (
+      <SidebarMenuItem>
+        <SidebarMenuButton asChild>
+          <Link
+            href={item.url}
+            className={cn(
+              "flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all",
+              "hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
+              isGroupActive(item) && "bg-primary text-primary-foreground shadow-sm",
+            )}
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            {!collapsed && <span className="font-medium">{item.title}</span>}
+          </Link>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
+  };
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-sidebar-border">
-      <SidebarHeader className="border-b border-sidebar-border p-4">
+    <Sidebar collapsible="icon" className="border-r border-sidebar-border/80 bg-sidebar/95 backdrop-blur">
+      <SidebarHeader className="border-b border-sidebar-border/80 p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-cyan-500 text-primary-foreground shadow-md">
             <Shield className="h-5 w-5" />
           </div>
           {!collapsed && (
             <div className="flex flex-col">
-              <span className="font-semibold text-foreground">ZIS Manager</span>
-              <span className="text-xs text-muted-foreground">Zakat, Infaq, Sedekah</span>
+              <span className="font-semibold text-foreground">Zakatku Console</span>
+              <span className="text-xs text-muted-foreground">Modern ZIS Operation</span>
             </div>
           )}
         </div>
@@ -117,7 +169,7 @@ export function AppSidebar() {
       <SidebarContent className="px-2 py-4">
         {/* Period Selector */}
         {!collapsed && (
-          <div className="mb-4 px-2">
+          <div className="mb-4 rounded-xl border border-sidebar-border/80 bg-sidebar-accent/35 p-2.5">
             <div className="flex items-center gap-2 mb-2">
               <Calendar className="h-4 w-4 text-muted-foreground" />
               <span className="text-xs font-medium text-muted-foreground">Periode Aktif</span>
@@ -151,7 +203,9 @@ export function AppSidebar() {
 
         {/* Main Navigation */}
         <SidebarGroup>
-          <SidebarGroupLabel className="text-xs">Menu Utama</SidebarGroupLabel>
+          <SidebarGroupLabel className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
+            Menu Utama
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {mainNavItems.map((item) => (
@@ -163,7 +217,9 @@ export function AppSidebar() {
 
         {/* Data Management */}
         <SidebarGroup>
-          <SidebarGroupLabel className="text-xs">Data Master</SidebarGroupLabel>
+          <SidebarGroupLabel className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
+            Data Master
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {dataNavItems.map((item) => (
@@ -175,7 +231,9 @@ export function AppSidebar() {
 
         {/* Transactions */}
         <SidebarGroup>
-          <SidebarGroupLabel className="text-xs">Transaksi</SidebarGroupLabel>
+          <SidebarGroupLabel className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
+            Transaksi
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {transactionNavItems.map((item) => (
@@ -187,7 +245,9 @@ export function AppSidebar() {
 
         {/* Reports & Settings */}
         <SidebarGroup>
-          <SidebarGroupLabel className="text-xs">Lainnya</SidebarGroupLabel>
+          <SidebarGroupLabel className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
+            Lainnya
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {reportNavItems.map((item) => (
@@ -200,7 +260,9 @@ export function AppSidebar() {
         {/* Super Admin Only */}
         {hasRole('super_admin') && (
           <SidebarGroup>
-            <SidebarGroupLabel className="text-xs">Administrasi</SidebarGroupLabel>
+            <SidebarGroupLabel className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
+              Administrasi
+            </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {adminNavItems.map((item) => (
@@ -212,8 +274,8 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border p-4">
-        <div className="flex items-center gap-3">
+      <SidebarFooter className="border-t border-sidebar-border/80 p-4">
+        <div className="flex items-center gap-3 rounded-xl border border-sidebar-border/80 bg-sidebar-accent/35 p-2.5">
           <Avatar className="h-9 w-9">
             <AvatarFallback className="bg-primary/10 text-primary text-sm">
               {profile?.full_name?.charAt(0)?.toUpperCase() || "U"}

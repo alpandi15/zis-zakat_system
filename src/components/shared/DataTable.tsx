@@ -23,6 +23,7 @@ interface DataTableProps<T> {
   title: string;
   data: T[];
   columns: Column<T>[];
+  toolbarExtra?: ReactNode;
   searchPlaceholder?: string;
   searchKey?: keyof T;
   onAdd?: () => void;
@@ -39,6 +40,7 @@ export function DataTable<T extends { id: string }>({
   title,
   data,
   columns,
+  toolbarExtra,
   searchPlaceholder = "Cari...",
   searchKey,
   onAdd,
@@ -61,35 +63,41 @@ export function DataTable<T extends { id: string }>({
     : data;
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-        <CardTitle className="text-lg">{title}</CardTitle>
-        <div className="flex items-center gap-2">
+    <Card className="border-border/60 bg-card/80 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/70">
+      <CardHeader className="flex flex-col gap-4 pb-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-1">
+          <CardTitle className="text-lg">{title}</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Menampilkan {filteredData.length} dari {data.length} data
+          </p>
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+          {toolbarExtra}
           {searchKey && (
-            <div className="relative">
+            <div className="relative w-full sm:w-auto">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder={searchPlaceholder}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-[200px] pl-9"
+                className="h-9 w-full pl-9 sm:w-[220px]"
               />
             </div>
           )}
           {onExportPDF && (
-            <Button variant="outline" size="sm" onClick={onExportPDF}>
+            <Button variant="outline" size="sm" className="h-9" onClick={onExportPDF}>
               <FileText className="mr-2 h-4 w-4" />
               PDF
             </Button>
           )}
           {onExportExcel && (
-            <Button variant="outline" size="sm" onClick={onExportExcel}>
+            <Button variant="outline" size="sm" className="h-9" onClick={onExportExcel}>
               <FileSpreadsheet className="mr-2 h-4 w-4" />
               Excel
             </Button>
           )}
           {onAdd && !isReadOnly && (
-            <Button size="sm" onClick={onAdd}>
+            <Button size="sm" className="h-9" onClick={onAdd}>
               <Plus className="mr-2 h-4 w-4" />
               {addLabel}
             </Button>
@@ -106,8 +114,8 @@ export function DataTable<T extends { id: string }>({
             <p className="text-muted-foreground">{emptyMessage}</p>
           </div>
         ) : (
-          <div className="rounded-md border">
-            <Table>
+          <div className="rounded-xl border border-border/70">
+            <Table className="min-w-[720px]">
               <TableHeader>
                 <TableRow>
                   {columns.map((column) => (

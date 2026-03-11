@@ -30,16 +30,25 @@ export function AppLayout({ children, title }: AppLayoutProps) {
 
   return (
     <SidebarProvider>
-      <div className="flex min-h-screen w-full bg-background">
+      <div className="flex min-h-screen w-full bg-[radial-gradient(1200px_circle_at_100%_0%,hsl(var(--primary)/0.08),transparent_40%),radial-gradient(900px_circle_at_0%_100%,hsl(196_90%_45%/0.06),transparent_35%),hsl(var(--background))]">
         <AppSidebar />
-        <main className="flex-1 overflow-auto">
-          <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-6">
-            <SidebarTrigger className="-ml-2" />
+        <main className="relative flex-1 overflow-x-hidden">
+          <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-border/60 bg-background/80 px-4 backdrop-blur-xl supports-[backdrop-filter]:bg-background/55 sm:px-6 lg:px-8">
+            <SidebarTrigger className="-ml-1 h-8 w-8 rounded-full border border-border/60 bg-background/70" />
             {title && (
-              <h1 className="text-lg font-semibold text-foreground">{title}</h1>
+              <div className="min-w-0">
+                <h1 className="truncate text-base font-semibold tracking-tight text-foreground sm:text-lg">
+                  {title}
+                </h1>
+                <p className="hidden text-xs text-muted-foreground sm:block">
+                  Operasional zakat fitrah, zakat mal, dan fidyah
+                </p>
+              </div>
             )}
           </header>
-          <div className="p-6">{children}</div>
+          <div className="px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+            <div className="mx-auto w-full max-w-[1600px] animate-fade-in">{children}</div>
+          </div>
         </main>
       </div>
     </SidebarProvider>

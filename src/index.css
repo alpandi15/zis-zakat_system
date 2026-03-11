@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -129,6 +129,38 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    background-image: radial-gradient(circle at 15% 10%, hsl(var(--primary) / 0.05), transparent 25%),
+      radial-gradient(circle at 85% 15%, hsl(196 90% 45% / 0.06), transparent 22%);
+    background-attachment: fixed;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: 'Sora', 'Plus Jakarta Sans', system-ui, sans-serif;
+    letter-spacing: -0.015em;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.22);
+    color: hsl(var(--foreground));
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+    background-color: hsl(var(--muted-foreground) / 0.35);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.5);
   }
 }
 
@@ -147,6 +179,10 @@
 
   .shadow-glow {
     box-shadow: var(--shadow-glow);
+  }
+
+  .glass-card {
+    @apply border border-border/70 bg-card/75 backdrop-blur supports-[backdrop-filter]:bg-card/65;
   }
 
   .animate-fade-in {

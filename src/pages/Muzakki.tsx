@@ -111,6 +111,17 @@ export default function MuzakkiPage() {
         isReadOnly={isReadOnly}
         onAdd={handleAdd}
         addLabel="Tambah Muzakki"
+        toolbarExtra={
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9"
+            onClick={() => router.push("/members?source=muzakki_members")}
+          >
+            <Users className="h-4 w-4" />
+            Anggota Keluarga
+          </Button>
+        }
         searchKey="name"
         searchPlaceholder="Cari muzakki..."
         emptyMessage="Belum ada data muzakki"

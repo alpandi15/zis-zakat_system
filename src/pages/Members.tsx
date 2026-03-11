@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/router";
 import { supabase } from "@/integrations/supabase/client";
@@ -26,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Edit, Eye } from "lucide-react";
+import { Edit, Eye, Users } from "lucide-react";
 
 interface MuzakkiMember {
   id: string;
@@ -37,7 +37,15 @@ interface MuzakkiMember {
   notes: string | null;
   is_active: boolean;
   is_dependent: boolean;
+  source_type: "member" | "muzakki";
   muzakki?: { name: string };
+}
+
+interface MuzakkiRow {
+  id: string;
+  name: string;
+  notes: string | null;
+  is_active: boolean;
 }
 
 const RELATIONSHIP_LABELS: Record<string, string> = {
@@ -50,6 +58,8 @@ const RELATIONSHIP_LABELS: Record<string, string> = {
 export default function Members() {
   const router = useRouter();
   const muzakkiFilter = typeof router.query.muzakki === "string" ? router.query.muzakki : null;
+  const sourceFromQuery = router.query.source === "muzakki" ? "muzakki" : "muzakki_members";
+  const [memberSource, setMemberSource] = useState<"muzakki_members" | "muzakki">("muzakki_members");
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<MuzakkiMember | null>(null);
@@ -65,6 +75,11 @@ export default function Members() {
   const { toast } = useToast();
   const { isReadOnly, selectedPeriod } = usePeriod();
   const queryClient = useQueryClient();
+  const canManageMembers = !isReadOnly && memberSource === "muzakki_members";
+
+  useEffect(() => {
+    setMemberSource(sourceFromQuery);
+  }, [sourceFromQuery]);
 
   const { data: muzakkiList = [] } = useQuery({
     queryKey: ["muzakki"],
@@ -76,8 +91,32 @@ export default function Members() {
   });
 
   const { data: members = [], isLoading } = useQuery({
-    queryKey: ["muzakki-members", muzakkiFilter],
+    queryKey: ["muzakki-members", muzakkiFilter, memberSource],
     queryFn: async () => {
+      if (memberSource === "muzakki") {
+        let muzakkiQuery = supabase.from("muzakki").select("id, name, notes, is_active").order("name");
+
+        if (muzakkiFilter) {
+          muzakkiQuery = muzakkiQuery.eq("id", muzakkiFilter);
+        }
+
+        const { data, error } = await muzakkiQuery;
+        if (error) throw error;
+
+        return (data as MuzakkiRow[]).map((m) => ({
+          id: `muzakki-${m.id}`,
+          muzakki_id: m.id,
+          name: m.name,
+          relationship: "head_of_family",
+          birth_date: null,
+          notes: m.notes,
+          is_active: m.is_active,
+          is_dependent: true,
+          source_type: "muzakki" as const,
+          muzakki: { name: m.name },
+        })) as MuzakkiMember[];
+      }
+
       let query = supabase
         .from("muzakki_members")
         .select("*, muzakki:muzakki_id(name)")
@@ -89,7 +128,10 @@ export default function Members() {
 
       const { data, error } = await query;
       if (error) throw error;
-      return data as MuzakkiMember[];
+      return (data as Omit<MuzakkiMember, "source_type">[]).map((member) => ({
+        ...member,
+        source_type: "member" as const,
+      })) as MuzakkiMember[];
     },
   });
 
@@ -155,6 +197,7 @@ export default function Members() {
   };
 
   const handleEdit = (member: MuzakkiMember) => {
+    if (!canManageMembers || member.source_type !== "member") return;
     setEditingMember(member);
     setFormData({
       muzakki_id: member.muzakki_id,
@@ -169,11 +212,16 @@ export default function Members() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManageMembers) return;
     if (editingMember) {
       updateMutation.mutate({ id: editingMember.id, ...formData });
     } else {
       createMutation.mutate(formData);
     }
+  };
+
+  const handleViewMuzakki = (member: MuzakkiMember) => {
+    router.push(`/muzakki/${member.muzakki_id}`);
   };
 
   const columns: Column<MuzakkiMember>[] = [
@@ -217,18 +265,61 @@ export default function Members() {
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
       <DataTable
-        title={muzakkiFilter ? `Anggota Keluarga` : "Semua Anggota Keluarga"}
+        title={
+          memberSource === "muzakki_members"
+            ? muzakkiFilter
+              ? "Anggota Keluarga"
+              : "Semua Anggota Keluarga"
+            : "Data Muzakki sebagai Kepala Keluarga"
+        }
         data={members}
         columns={columns}
         isLoading={isLoading}
         isReadOnly={isReadOnly}
-        onAdd={() => { resetForm(); setEditingMember(null); setIsDialogOpen(true); }}
+        onAdd={
+          canManageMembers
+            ? () => {
+                resetForm();
+                setEditingMember(null);
+                setIsDialogOpen(true);
+              }
+            : undefined
+        }
         addLabel="Tambah Anggota"
         searchKey="name"
         searchPlaceholder="Cari anggota..."
-        emptyMessage="Belum ada data anggota"
+        emptyMessage={
+          memberSource === "muzakki_members"
+            ? "Belum ada data anggota"
+            : "Belum ada data muzakki"
+        }
+        toolbarExtra={
+          <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-background/70 px-2 py-1">
+            <span className="hidden text-xs text-muted-foreground sm:inline">Sumber:</span>
+            <Select
+              value={memberSource}
+              onValueChange={(value) => {
+                setMemberSource(value as "muzakki_members" | "muzakki");
+                setIsDialogOpen(false);
+                setEditingMember(null);
+              }}
+            >
+              <SelectTrigger className="h-8 min-w-[170px] border-0 bg-transparent px-2 text-xs focus:ring-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="muzakki_members">Tabel `muzakki_members`</SelectItem>
+                <SelectItem value="muzakki">Tabel `muzakki`</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        }
         actions={(member) => (
-          !isReadOnly ? (
+          memberSource === "muzakki" ? (
+            <Button variant="ghost" size="icon" onClick={() => handleViewMuzakki(member)} title="Buka detail muzakki">
+              <Users className="h-4 w-4" />
+            </Button>
+          ) : !isReadOnly ? (
             <Button variant="ghost" size="icon" onClick={() => handleEdit(member)}>
               <Edit className="h-4 w-4" />
             </Button>
