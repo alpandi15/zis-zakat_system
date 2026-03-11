@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, ArrowLeft, ArrowRight, Check } from "lucide-react";
 
@@ -40,6 +41,7 @@ interface MemberInput {
   relationship: string;
   birth_date: string;
   notes: string;
+  is_dependent: boolean;
 }
 
 const RELATIONSHIP_OPTIONS = [
@@ -68,14 +70,30 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
 
   // Members form data (for create flow)
   const [members, setMembers] = useState<MemberInput[]>([
-    { id: crypto.randomUUID(), name: "", relationship: "head_of_family", birth_date: "", notes: "" },
+    {
+      id: crypto.randomUUID(),
+      name: "",
+      relationship: "head_of_family",
+      birth_date: "",
+      notes: "",
+      is_dependent: true,
+    },
   ]);
 
   // Reset form when dialog opens/closes
   const resetForm = () => {
     setStep(1);
     setMuzakkiData({ name: "", address: "", phone: "", email: "", notes: "" });
-    setMembers([{ id: crypto.randomUUID(), name: "", relationship: "head_of_family", birth_date: "", notes: "" }]);
+    setMembers([
+      {
+        id: crypto.randomUUID(),
+        name: "",
+        relationship: "head_of_family",
+        birth_date: "",
+        notes: "",
+        is_dependent: true,
+      },
+    ]);
   };
 
   const handleOpenChange = (open: boolean) => {
@@ -121,6 +139,7 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
             relationship: m.relationship as "head_of_family" | "wife" | "child" | "parent",
             birth_date: m.birth_date || null,
             notes: m.notes || null,
+            is_dependent: m.is_dependent,
           }))
         );
         if (membersError) throw membersError;
@@ -167,7 +186,14 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
   const addMember = () => {
     setMembers([
       ...members,
-      { id: crypto.randomUUID(), name: "", relationship: "child", birth_date: "", notes: "" },
+      {
+        id: crypto.randomUUID(),
+        name: "",
+        relationship: "child",
+        birth_date: "",
+        notes: "",
+        is_dependent: true,
+      },
     ]);
   };
 
@@ -356,6 +382,24 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
                         value={member.notes}
                         onChange={(e) => updateMember(member.id, "notes", e.target.value)}
                         placeholder="Catatan (opsional)"
+                      />
+                    </div>
+                    <div className="col-span-2 flex items-center justify-between rounded-md border p-2">
+                      <div>
+                        <Label className="text-xs">Termasuk Tanggungan Zakat</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Anggota ini akan muncul pada transaksi Zakat Fitrah.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={member.is_dependent}
+                        onCheckedChange={(checked) =>
+                          setMembers((prev) =>
+                            prev.map((m) =>
+                              m.id === member.id ? { ...m, is_dependent: checked } : m
+                            )
+                          )
+                        }
                       />
                     </div>
                   </div>

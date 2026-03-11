@@ -40,6 +40,7 @@ interface MuzakkiMember {
   name: string;
   relationship: string;
   is_active: boolean;
+  is_dependent: boolean;
   already_paid?: boolean;
 }
 
@@ -144,13 +145,15 @@ export default function ZakatFitrah() {
       // Get all active members
       const { data: members, error: membersError } = await supabase
         .from("muzakki_members")
-        .select("id, name, relationship, is_active")
+        .select("id, name, relationship, is_active, is_dependent")
         .eq("muzakki_id", selectedMuzakkiId)
         .eq("is_active", true)
+        .eq("is_dependent", true)
         .order("relationship")
         .order("name");
       
       if (membersError) throw membersError;
+      if (!members || members.length === 0) return [];
 
       // Check which members already paid in this period
       const { data: paidItems, error: paidError } = await supabase

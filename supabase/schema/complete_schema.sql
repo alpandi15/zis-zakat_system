@@ -178,6 +178,7 @@ CREATE TABLE public.muzakki_members (
   birth_date DATE,
   notes TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
+  is_dependent BOOLEAN NOT NULL DEFAULT true,
   created_by UUID REFERENCES auth.users(id),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
@@ -280,6 +281,7 @@ CREATE TABLE public.zakat_mal_transactions (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   period_id UUID NOT NULL REFERENCES public.periods(id) ON DELETE RESTRICT,
   muzakki_id UUID NOT NULL REFERENCES public.muzakki(id) ON DELETE RESTRICT,
+  muzakki_member_id UUID REFERENCES public.muzakki_members(id) ON DELETE SET NULL,
   transaction_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   zakat_type public.zakat_mal_type NOT NULL,
   gross_amount NUMERIC NOT NULL,
@@ -312,6 +314,7 @@ CREATE TABLE public.fidyah_transactions (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   period_id UUID NOT NULL REFERENCES public.periods(id) ON DELETE RESTRICT,
   payer_muzakki_id UUID REFERENCES public.muzakki(id),
+  payer_member_id UUID REFERENCES public.muzakki_members(id) ON DELETE SET NULL,
   payer_name TEXT NOT NULL,
   payer_phone TEXT,
   payer_address TEXT,
@@ -439,6 +442,7 @@ CREATE INDEX idx_muzakki_is_active ON public.muzakki(is_active);
 -- Muzakki members indexes
 CREATE INDEX idx_muzakki_members_muzakki_id ON public.muzakki_members(muzakki_id);
 CREATE INDEX idx_muzakki_members_is_active ON public.muzakki_members(is_active);
+CREATE INDEX idx_muzakki_members_is_dependent ON public.muzakki_members(is_dependent);
 
 -- Mustahik indexes
 CREATE INDEX idx_mustahik_name ON public.mustahik(name);
@@ -457,10 +461,12 @@ CREATE INDEX idx_zakat_fitrah_transaction_items_period_id ON public.zakat_fitrah
 -- Zakat mal transactions indexes
 CREATE INDEX idx_zakat_mal_transactions_period_id ON public.zakat_mal_transactions(period_id);
 CREATE INDEX idx_zakat_mal_transactions_muzakki_id ON public.zakat_mal_transactions(muzakki_id);
+CREATE INDEX idx_zakat_mal_transactions_muzakki_member_id ON public.zakat_mal_transactions(muzakki_member_id);
 CREATE INDEX idx_zakat_mal_transactions_date ON public.zakat_mal_transactions(transaction_date);
 
 -- Fidyah transactions indexes
 CREATE INDEX idx_fidyah_transactions_period_id ON public.fidyah_transactions(period_id);
+CREATE INDEX idx_fidyah_transactions_payer_member_id ON public.fidyah_transactions(payer_member_id);
 CREATE INDEX idx_fidyah_transactions_date ON public.fidyah_transactions(transaction_date);
 
 -- Fund ledger indexes

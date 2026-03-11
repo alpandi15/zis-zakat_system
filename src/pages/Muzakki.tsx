@@ -45,7 +45,8 @@ export default function MuzakkiPage() {
       const { data: memberCounts, error: countError } = await supabase
         .from("muzakki_members")
         .select("muzakki_id")
-        .eq("is_active", true);
+        .eq("is_active", true)
+        .eq("is_dependent", true);
 
       if (countError) throw countError;
 

@@ -1,9 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
-import { MuzakkiSearchSelect } from "@/components/shared/MuzakkiSearchSelect";
 import { CurrencyInput } from "@/components/shared/CurrencyInput";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { Button } from "@/components/ui/button";
@@ -52,12 +51,20 @@ const ZAKAT_TYPE_LABELS: Record<string, string> = {
   trade: "Perdagangan",
 };
 
+const RELATIONSHIP_LABELS: Record<string, string> = {
+  head_of_family: "Kepala Keluarga",
+  wife: "Istri",
+  child: "Anak",
+  parent: "Orang Tua",
+};
+
 // Calculation mode types
 type CalculationMode = "from_assets" | "from_zakat";
 
 interface Transaction {
   id: string;
   muzakki_id: string;
+  muzakki_member_id: string | null;
   period_id: string;
   zakat_type: "income" | "gold" | "trade";
   gross_amount: number;
@@ -72,6 +79,15 @@ interface Transaction {
   transaction_date: string;
   notes: string | null;
   muzakki?: { name: string };
+  muzakki_member?: { name: string; relationship: "head_of_family" | "wife" | "child" | "parent" } | null;
+}
+
+interface MuzakkiMemberOption {
+  id: string;
+  name: string;
+  relationship: "head_of_family" | "wife" | "child" | "parent";
+  muzakki_id: string;
+  muzakki?: { name: string } | null;
 }
 
 export default function ZakatMal() {
@@ -83,7 +99,7 @@ export default function ZakatMal() {
   const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
 
   // Form state
-  const [selectedMuzakkiId, setSelectedMuzakkiId] = useState("");
+  const [selectedMemberId, setSelectedMemberId] = useState("");
   const [zakatType, setZakatType] = useState<"income" | "gold" | "trade">("income");
   const [calculationMode, setCalculationMode] = useState<CalculationMode>("from_assets");
   const [grossAmount, setGrossAmount] = useState(0);
@@ -125,7 +141,7 @@ export default function ZakatMal() {
       if (!selectedPeriod?.id) return [];
       const { data, error } = await supabase
         .from("zakat_mal_transactions")
-        .select("*, muzakki:muzakki_id(name)")
+        .select("*, muzakki:muzakki_id(name), muzakki_member:muzakki_member_id(name, relationship)")
         .eq("period_id", selectedPeriod.id)
         .order("transaction_date", { ascending: false });
       if (error) throw error;
@@ -134,25 +150,27 @@ export default function ZakatMal() {
     enabled: !!selectedPeriod?.id,
   });
 
-  // Fetch muzakki list for display
-  const { data: muzakkiList = [] } = useQuery({
-    queryKey: ["muzakki-active"],
+  // Fetch active family members for payer selection
+  const { data: muzakkiMembers = [] } = useQuery({
+    queryKey: ["muzakki-members-active-for-zakat-mal"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("muzakki")
-        .select("id, name")
+        .from("muzakki_members")
+        .select("id, name, relationship, muzakki_id, muzakki:muzakki_id(name)")
         .eq("is_active", true)
         .order("name");
       if (error) throw error;
-      return data;
+      return data as MuzakkiMemberOption[];
     },
   });
+
+  const selectedMember = muzakkiMembers.find((m) => m.id === selectedMemberId) || null;
 
   // Create transaction mutation
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!selectedPeriod?.id) throw new Error("Periode tidak dipilih");
-      if (!selectedMuzakkiId) throw new Error("Pilih muzakki");
+      if (!selectedMember) throw new Error("Pilih anggota muzakki");
       if (calculationMode === "from_assets" && grossAmount <= 0) throw new Error("Jumlah harta harus lebih dari 0");
       if (calculationMode === "from_zakat" && directZakatInput <= 0) throw new Error("Jumlah zakat harus lebih dari 0");
 
@@ -160,7 +178,8 @@ export default function ZakatMal() {
       const { data: transaction, error: txError } = await supabase
         .from("zakat_mal_transactions")
         .insert({
-          muzakki_id: selectedMuzakkiId,
+          muzakki_id: selectedMember.muzakki_id,
+          muzakki_member_id: selectedMember.id,
           period_id: selectedPeriod.id,
           zakat_type: zakatType,
           gross_amount: displayGrossAmount,
@@ -183,7 +202,6 @@ export default function ZakatMal() {
 
       // Create ledger entry if above nisab
       if (isAboveNisab && finalZakat > 0) {
-        const selectedName = muzakkiList.find(m => m.id === selectedMuzakkiId)?.name;
         const { error: ledgerError } = await supabase
           .from("fund_ledger")
           .insert({
@@ -194,7 +212,7 @@ export default function ZakatMal() {
             amount_rice_kg: 0,
             reference_id: transaction.id,
             reference_type: "zakat_mal_transactions",
-            description: `Zakat Mal (${ZAKAT_TYPE_LABELS[zakatType]}) dari ${selectedName}`,
+            description: `Zakat Mal (${ZAKAT_TYPE_LABELS[zakatType]}) dari ${selectedMember.name}`,
           });
 
         if (ledgerError) throw ledgerError;
@@ -215,7 +233,7 @@ export default function ZakatMal() {
   });
 
   const resetForm = () => {
-    setSelectedMuzakkiId("");
+    setSelectedMemberId("");
     setZakatType("income");
     setCalculationMode("from_assets");
     setGrossAmount(0);
@@ -276,7 +294,7 @@ export default function ZakatMal() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Tanggal</TableHead>
-                    <TableHead>Muzakki</TableHead>
+                    <TableHead>Pembayar</TableHead>
                     <TableHead>Jenis</TableHead>
                     <TableHead>Nisab</TableHead>
                     <TableHead className="text-right">Zakat</TableHead>
@@ -289,7 +307,14 @@ export default function ZakatMal() {
                       <TableCell>
                         {format(new Date(tx.transaction_date), "dd MMM yyyy", { locale: idLocale })}
                       </TableCell>
-                      <TableCell className="font-medium">{tx.muzakki?.name}</TableCell>
+                      <TableCell>
+                        <p className="font-medium">{tx.muzakki_member?.name || tx.muzakki?.name || "-"}</p>
+                        {tx.muzakki_member?.relationship && (
+                          <p className="text-xs text-muted-foreground">
+                            {RELATIONSHIP_LABELS[tx.muzakki_member.relationship]}
+                          </p>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline">{ZAKAT_TYPE_LABELS[tx.zakat_type]}</Badge>
                       </TableCell>
@@ -333,12 +358,19 @@ export default function ZakatMal() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>Muzakki *</Label>
-                <MuzakkiSearchSelect
-                  value={selectedMuzakkiId}
-                  onChange={setSelectedMuzakkiId}
-                  placeholder="Cari atau tambah muzakki..."
-                />
+                <Label>Anggota Pembayar *</Label>
+                <Select value={selectedMemberId} onValueChange={setSelectedMemberId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih anggota muzakki" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {muzakkiMembers.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        {member.name} - {RELATIONSHIP_LABELS[member.relationship]} ({member.muzakki?.name || "Tanpa KK"})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label>Jenis Zakat *</Label>
@@ -561,8 +593,15 @@ export default function ZakatMal() {
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-muted-foreground">Muzakki</p>
-                  <p className="font-medium">{viewingTransaction.muzakki?.name}</p>
+                  <p className="text-muted-foreground">Pembayar</p>
+                  <p className="font-medium">
+                    {viewingTransaction.muzakki_member?.name || viewingTransaction.muzakki?.name}
+                  </p>
+                  {viewingTransaction.muzakki?.name && (
+                    <p className="text-xs text-muted-foreground">
+                      KK: {viewingTransaction.muzakki.name}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <p className="text-muted-foreground">Jenis Zakat</p>

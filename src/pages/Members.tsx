@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,6 +36,7 @@ interface MuzakkiMember {
   birth_date: string | null;
   notes: string | null;
   is_active: boolean;
+  is_dependent: boolean;
   muzakki?: { name: string };
 }
 
@@ -57,6 +59,7 @@ export default function Members() {
     relationship: "child" as string,
     birth_date: "",
     notes: "",
+    is_dependent: true,
   });
 
   const { toast } = useToast();
@@ -98,6 +101,7 @@ export default function Members() {
         relationship: data.relationship as "head_of_family" | "wife" | "child" | "parent",
         birth_date: data.birth_date || null,
         notes: data.notes || null,
+        is_dependent: data.is_dependent,
       });
       if (error) throw error;
     },
@@ -122,6 +126,7 @@ export default function Members() {
           relationship: data.relationship as "head_of_family" | "wife" | "child" | "parent",
           birth_date: data.birth_date || null,
           notes: data.notes || null,
+          is_dependent: data.is_dependent,
         })
         .eq("id", data.id);
       if (error) throw error;
@@ -145,6 +150,7 @@ export default function Members() {
       relationship: "child",
       birth_date: "",
       notes: "",
+      is_dependent: true,
     });
   };
 
@@ -156,6 +162,7 @@ export default function Members() {
       relationship: member.relationship,
       birth_date: member.birth_date || "",
       notes: member.notes || "",
+      is_dependent: member.is_dependent,
     });
     setIsDialogOpen(true);
   };
@@ -182,6 +189,15 @@ export default function Members() {
       render: (m) => (
         <Badge variant="outline">
           {RELATIONSHIP_LABELS[m.relationship] || m.relationship}
+        </Badge>
+      ),
+    },
+    {
+      key: "is_dependent",
+      header: "Tanggungan",
+      render: (m) => (
+        <Badge variant={m.is_dependent ? "default" : "secondary"}>
+          {m.is_dependent ? "Ya" : "Tidak"}
         </Badge>
       ),
     },
@@ -285,6 +301,19 @@ export default function Members() {
                 type="date"
                 value={formData.birth_date}
                 onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div>
+                <Label htmlFor="is_dependent">Termasuk Tanggungan</Label>
+                <p className="text-xs text-muted-foreground">
+                  Anggota tanggungan muncul pada transaksi zakat fitrah.
+                </p>
+              </div>
+              <Switch
+                id="is_dependent"
+                checked={formData.is_dependent}
+                onCheckedChange={(checked) => setFormData({ ...formData, is_dependent: checked })}
               />
             </div>
             <div className="space-y-2">

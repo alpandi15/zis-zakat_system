@@ -1,9 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
-import { MuzakkiSearchSelect } from "@/components/shared/MuzakkiSearchSelect";
 import { CurrencyInput } from "@/components/shared/CurrencyInput";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { Button } from "@/components/ui/button";
@@ -44,7 +43,9 @@ import type { Enums } from "@/integrations/supabase/types";
 
 const DEFAULT_DAILY_RATE_CASH = 35000;
 const DEFAULT_DAILY_RATE_FOOD_KG = 0.75;
+
 type FidyahReason = Enums<"fidyah_reason">;
+type MemberRelationship = Enums<"member_relationship">;
 
 const REASON_LABELS: Record<FidyahReason, string> = {
   chronic_illness: "Sakit Kronis",
@@ -55,7 +56,7 @@ const REASON_LABELS: Record<FidyahReason, string> = {
   other: "Lainnya",
 };
 
-const RELATIONSHIP_LABELS: Record<string, string> = {
+const RELATIONSHIP_LABELS: Record<MemberRelationship, string> = {
   head_of_family: "Kepala Keluarga",
   wife: "Istri",
   child: "Anak",
@@ -66,11 +67,11 @@ interface Transaction {
   id: string;
   period_id: string;
   payer_name: string;
+  payer_phone: string | null;
+  payer_address: string | null;
   payer_muzakki_id: string | null;
-  is_paying_for_self: boolean;
-  beneficiary_name: string | null;
-  beneficiary_relationship: string | null;
-  reason: string;
+  payer_member_id: string | null;
+  reason: FidyahReason;
   reason_notes: string | null;
   missed_days: number;
   daily_rate: number;
@@ -80,15 +81,12 @@ interface Transaction {
   food_amount_kg: number | null;
   transaction_date: string;
   notes: string | null;
-  payer_muzakki?: { name: string } | null;
+  payer_member?: { name: string; relationship: MemberRelationship } | null;
 }
 
-interface MuzakkiMember {
+interface ExistingMember {
   id: string;
   muzakki_id: string;
-  name: string;
-  relationship: string;
-  is_active: boolean;
 }
 
 export default function FidyahPage() {
@@ -100,14 +98,10 @@ export default function FidyahPage() {
   const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
 
   // Form state
-  const [selectedMuzakkiId, setSelectedMuzakkiId] = useState("");
-  const [selectedMemberId, setSelectedMemberId] = useState("");
   const [payerName, setPayerName] = useState("");
   const [payerPhone, setPayerPhone] = useState("");
   const [payerAddress, setPayerAddress] = useState("");
-  const [isPayingForSelf, setIsPayingForSelf] = useState(true);
-  const [beneficiaryName, setBeneficiaryName] = useState("");
-  const [beneficiaryRelationship, setBeneficiaryRelationship] = useState("");
+  const [newMemberRelationship, setNewMemberRelationship] = useState<MemberRelationship>("head_of_family");
   const [reason, setReason] = useState<FidyahReason>("elderly");
   const [reasonNotes, setReasonNotes] = useState("");
   const [missedDays, setMissedDays] = useState(1);
@@ -134,7 +128,7 @@ export default function FidyahPage() {
       if (!selectedPeriod?.id) return [];
       const { data, error } = await supabase
         .from("fidyah_transactions")
-        .select("*, payer_muzakki:payer_muzakki_id(name)")
+        .select("*, payer_member:payer_member_id(name, relationship)")
         .eq("period_id", selectedPeriod.id)
         .order("transaction_date", { ascending: false });
       if (error) throw error;
@@ -143,86 +137,82 @@ export default function FidyahPage() {
     enabled: !!selectedPeriod?.id,
   });
 
-  // Fetch muzakki list
-  const { data: muzakkiList = [] } = useQuery({
-    queryKey: ["muzakki-active"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("muzakki")
-        .select("id, name, phone, address")
-        .eq("is_active", true)
-        .order("name");
-      if (error) throw error;
-      return data;
-    },
-  });
-
-  // Fetch members for selected muzakki
-  const { data: muzakkiMembers = [] } = useQuery({
-    queryKey: ["muzakki-members", selectedMuzakkiId],
-    queryFn: async () => {
-      if (!selectedMuzakkiId) return [];
-      const { data, error } = await supabase
-        .from("muzakki_members")
-        .select("id, muzakki_id, name, relationship, is_active")
-        .eq("muzakki_id", selectedMuzakkiId)
-        .eq("is_active", true)
-        .order("relationship");
-      if (error) throw error;
-      return data as MuzakkiMember[];
-    },
-    enabled: !!selectedMuzakkiId,
-  });
-
-  // Handle muzakki selection
-  const handleMuzakkiSelect = (muzakkiId: string) => {
-    setSelectedMuzakkiId(muzakkiId);
-    setSelectedMemberId("");
-    setPayerName("");
-    
-    const selected = muzakkiList.find(m => m.id === muzakkiId);
-    if (selected) {
-      setPayerPhone(selected.phone || "");
-      setPayerAddress(selected.address || "");
-    }
-  };
-
-  // Handle member selection - auto-fill payer name
-  const handleMemberSelect = (memberId: string) => {
-    setSelectedMemberId(memberId);
-    const member = muzakkiMembers.find(m => m.id === memberId);
-    if (member) {
-      setPayerName(member.name);
-    }
-  };
-
   // Create transaction mutation
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!selectedPeriod?.id) throw new Error("Periode tidak dipilih");
-      if (!selectedMuzakkiId) throw new Error("Pilih muzakki terlebih dahulu");
-      if (!selectedMemberId) throw new Error("Pilih anggota pembayar fidyah");
-      if (!payerName.trim()) throw new Error("Nama pembayar harus diisi");
+      const cleanName = payerName.trim();
+      if (!cleanName) throw new Error("Nama pembayar harus diisi");
       if (missedDays <= 0) throw new Error("Jumlah hari harus lebih dari 0");
-      if (!isPayingForSelf && !beneficiaryName.trim()) {
-        throw new Error("Nama penerima fidyah harus diisi");
-      }
 
       const dailyRate = paymentType === "cash" ? dailyRateCash : dailyRateFood;
       const totalAmount = paymentType === "cash" ? totalCash : totalFood;
+
+      let payerMemberId: string | null = null;
+      let payerMuzakkiId: string | null = null;
+
+      // 1) Try finding existing active member with exact name (case-insensitive)
+      const { data: existingMembers, error: findError } = await supabase
+        .from("muzakki_members")
+        .select("id, muzakki_id")
+        .eq("is_active", true)
+        .ilike("name", cleanName)
+        .order("created_at", { ascending: true })
+        .limit(1);
+
+      if (findError) throw findError;
+
+      const existingMember = (existingMembers?.[0] ?? null) as ExistingMember | null;
+
+      if (existingMember) {
+        payerMemberId = existingMember.id;
+        payerMuzakkiId = existingMember.muzakki_id;
+      } else {
+        // 2) Auto-create household + member if member does not exist
+        const { data: newMuzakki, error: muzakkiError } = await supabase
+          .from("muzakki")
+          .insert({
+            name: cleanName,
+            phone: payerPhone || null,
+            address: payerAddress || null,
+            notes: "Auto-created from Fidyah transaction",
+          })
+          .select("id")
+          .single();
+
+        if (muzakkiError) throw muzakkiError;
+
+        const { data: newMember, error: memberError } = await supabase
+          .from("muzakki_members")
+          .insert({
+            muzakki_id: newMuzakki.id,
+            name: cleanName,
+            relationship: newMemberRelationship,
+            is_dependent: true,
+            notes: "Auto-created from Fidyah transaction",
+          })
+          .select("id, muzakki_id")
+          .single();
+
+        if (memberError) throw memberError;
+
+        payerMemberId = newMember.id;
+        payerMuzakkiId = newMember.muzakki_id;
+      }
 
       // Create transaction
       const { data: transaction, error: txError } = await supabase
         .from("fidyah_transactions")
         .insert({
           period_id: selectedPeriod.id,
-          payer_muzakki_id: selectedMuzakkiId,
-          payer_name: payerName.trim(),
+          payer_muzakki_id: payerMuzakkiId,
+          payer_member_id: payerMemberId,
+          payer_name: cleanName,
           payer_phone: payerPhone || null,
           payer_address: payerAddress || null,
-          is_paying_for_self: isPayingForSelf,
-          beneficiary_name: isPayingForSelf ? null : beneficiaryName.trim(),
-          beneficiary_relationship: isPayingForSelf ? null : beneficiaryRelationship || null,
+          is_paying_for_self: true,
+          beneficiary_name: null,
+          beneficiary_relationship: null,
           reason,
           reason_notes: reason === "other" ? reasonNotes : null,
           missed_days: missedDays,
@@ -250,7 +240,7 @@ export default function FidyahPage() {
           amount_food_kg: paymentType === "food" ? totalFood : 0,
           reference_id: transaction.id,
           reference_type: "fidyah_transactions",
-          description: `Fidyah dari ${payerName} (${missedDays} hari)`,
+          description: `Fidyah dari ${cleanName} (${missedDays} hari)`,
         });
 
       if (ledgerError) throw ledgerError;
@@ -260,6 +250,8 @@ export default function FidyahPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["fidyah-transactions"] });
       queryClient.invalidateQueries({ queryKey: ["fund-balances"] });
+      queryClient.invalidateQueries({ queryKey: ["muzakki"] });
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members"] });
       resetForm();
       setIsFormOpen(false);
       toast({ title: "Transaksi fidyah berhasil disimpan" });
@@ -270,14 +262,10 @@ export default function FidyahPage() {
   });
 
   const resetForm = () => {
-    setSelectedMuzakkiId("");
-    setSelectedMemberId("");
     setPayerName("");
     setPayerPhone("");
     setPayerAddress("");
-    setIsPayingForSelf(true);
-    setBeneficiaryName("");
-    setBeneficiaryRelationship("");
+    setNewMemberRelationship("head_of_family");
     setReason("elderly");
     setReasonNotes("");
     setMissedDays(1);
@@ -324,7 +312,6 @@ export default function FidyahPage() {
                   <TableRow>
                     <TableHead>Tanggal</TableHead>
                     <TableHead>Pembayar</TableHead>
-                    <TableHead>Penerima</TableHead>
                     <TableHead>Alasan</TableHead>
                     <TableHead>Hari</TableHead>
                     <TableHead className="text-right">Total</TableHead>
@@ -332,17 +319,17 @@ export default function FidyahPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {transactions.map(tx => (
+                  {transactions.map((tx) => (
                     <TableRow key={tx.id}>
                       <TableCell>
                         {format(new Date(tx.transaction_date), "dd MMM yyyy", { locale: idLocale })}
                       </TableCell>
-                      <TableCell className="font-medium">{tx.payer_name}</TableCell>
                       <TableCell>
-                        {tx.is_paying_for_self ? (
-                          <span className="text-muted-foreground">Diri Sendiri</span>
-                        ) : (
-                          tx.beneficiary_name
+                        <p className="font-medium">{tx.payer_name}</p>
+                        {tx.payer_member?.relationship && (
+                          <p className="text-xs text-muted-foreground">
+                            {RELATIONSHIP_LABELS[tx.payer_member.relationship]}
+                          </p>
                         )}
                       </TableCell>
                       <TableCell>
@@ -375,47 +362,23 @@ export default function FidyahPage() {
             <DialogTitle>Tambah Transaksi Fidyah</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Muzakki & Member Selection */}
             <div className="space-y-3 border rounded-lg p-4">
               <h3 className="font-medium">Data Pembayar</h3>
               <div className="space-y-2">
-                <Label>Pilih Muzakki *</Label>
-                <MuzakkiSearchSelect
-                  value={selectedMuzakkiId}
-                  onChange={handleMuzakkiSelect}
-                  placeholder="Cari atau tambah muzakki..."
+                <Label htmlFor="payerName">Nama Anggota Pembayar *</Label>
+                <Input
+                  id="payerName"
+                  value={payerName}
+                  onChange={(e) => setPayerName(e.target.value)}
+                  placeholder="Contoh: Ahmad"
+                  required
                 />
+                <p className="text-xs text-muted-foreground">
+                  Sistem akan mencari nama anggota yang sudah ada. Jika belum ada, data muzakki + anggota dibuat otomatis.
+                </p>
               </div>
-              
-              {selectedMuzakkiId && (
-                <div className="space-y-2">
-                  <Label>Pilih Anggota Pembayar Fidyah *</Label>
-                  <Select value={selectedMemberId} onValueChange={handleMemberSelect}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Pilih anggota keluarga" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {muzakkiMembers.map(m => (
-                        <SelectItem key={m.id} value={m.id}>
-                          {m.name} ({RELATIONSHIP_LABELS[m.relationship] || m.relationship})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              
+
               <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="payerName">Nama Pembayar</Label>
-                  <Input
-                    id="payerName"
-                    value={payerName}
-                    readOnly
-                    className="bg-muted"
-                    placeholder="Otomatis dari anggota"
-                  />
-                </div>
                 <div className="space-y-2">
                   <Label htmlFor="payerPhone">No. Telepon</Label>
                   <Input
@@ -425,45 +388,34 @@ export default function FidyahPage() {
                     placeholder="08xxxxxxxxxx"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>Hubungan (jika data baru)</Label>
+                  <Select
+                    value={newMemberRelationship}
+                    onValueChange={(value) => setNewMemberRelationship(value as MemberRelationship)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="head_of_family">Kepala Keluarga</SelectItem>
+                      <SelectItem value="wife">Istri</SelectItem>
+                      <SelectItem value="child">Anak</SelectItem>
+                      <SelectItem value="parent">Orang Tua</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            </div>
 
-            {/* Beneficiary Section */}
-            <div className="space-y-3 border rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-medium">Penerima Fidyah</h3>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="payingForSelf" className="text-sm">Untuk Diri Sendiri</Label>
-                  <Switch
-                    id="payingForSelf"
-                    checked={isPayingForSelf}
-                    onCheckedChange={setIsPayingForSelf}
-                  />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="payerAddress">Alamat</Label>
+                <Textarea
+                  id="payerAddress"
+                  value={payerAddress}
+                  onChange={(e) => setPayerAddress(e.target.value)}
+                  placeholder="Alamat (opsional)"
+                />
               </div>
-              {!isPayingForSelf && (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="beneficiaryName">Nama Penerima *</Label>
-                    <Input
-                      id="beneficiaryName"
-                      value={beneficiaryName}
-                      onChange={(e) => setBeneficiaryName(e.target.value)}
-                      placeholder="Nama penerima fidyah"
-                      required={!isPayingForSelf}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="beneficiaryRelationship">Hubungan</Label>
-                    <Input
-                      id="beneficiaryRelationship"
-                      value={beneficiaryRelationship}
-                      onChange={(e) => setBeneficiaryRelationship(e.target.value)}
-                      placeholder="Contoh: Orang Tua, Anak"
-                    />
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Reason Section */}
@@ -476,7 +428,9 @@ export default function FidyahPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {Object.entries(REASON_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -510,7 +464,7 @@ export default function FidyahPage() {
               <h3 className="font-medium">Pembayaran</h3>
               <div className="space-y-2">
                 <Label>Jenis Pembayaran *</Label>
-                <RadioGroup value={paymentType} onValueChange={(v) => setPaymentType(v as "cash" | "food")}>
+                <RadioGroup value={paymentType} onValueChange={(v) => setPaymentType(v as "cash" | "food") }>
                   <div className="flex gap-4">
                     <div className="flex items-center gap-2">
                       <RadioGroupItem value="cash" id="cash" />
@@ -527,11 +481,9 @@ export default function FidyahPage() {
               {paymentType === "cash" && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Tarif dari periode: {formatCurrency(periodDailyRate)}/hari
-                      </p>
-                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Tarif dari periode: {formatCurrency(periodDailyRate)}/hari
+                    </p>
                     <div className="flex items-center gap-2">
                       <Label htmlFor="override" className="text-sm">Override</Label>
                       <Switch
@@ -546,13 +498,11 @@ export default function FidyahPage() {
                   </div>
                   {isOverrideDailyRate && (
                     <div className="space-y-2">
-                      <Label htmlFor="customRate">Tarif Kustom per Hari (Rp)</Label>
-                      <Input
-                        id="customRate"
-                        type="number"
+                      <Label>Tarif Kustom per Hari (Rp)</Label>
+                      <CurrencyInput
                         value={customDailyRate}
-                        onChange={(e) => setCustomDailyRate(Number(e.target.value))}
-                        min={0}
+                        onChange={setCustomDailyRate}
+                        placeholder="0"
                       />
                     </div>
                   )}
@@ -578,9 +528,7 @@ export default function FidyahPage() {
                 <p className="text-xl font-bold">
                   {paymentType === "cash" ? formatCurrency(totalCash) : `${totalFood} kg`}
                 </p>
-                {isOverrideDailyRate && (
-                  <Badge variant="secondary" className="mt-1">Nilai Kustom</Badge>
-                )}
+                {isOverrideDailyRate && <Badge variant="secondary" className="mt-1">Nilai Kustom</Badge>}
               </div>
             </div>
 
@@ -626,12 +574,6 @@ export default function FidyahPage() {
                   <p className="font-medium">{viewingTransaction.payer_name}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Penerima</p>
-                  <p className="font-medium">
-                    {viewingTransaction.is_paying_for_self ? "Diri Sendiri" : viewingTransaction.beneficiary_name}
-                  </p>
-                </div>
-                <div>
                   <p className="text-muted-foreground">Alasan</p>
                   <p className="font-medium">{REASON_LABELS[viewingTransaction.reason]}</p>
                 </div>
@@ -646,6 +588,12 @@ export default function FidyahPage() {
                       ? formatCurrency(viewingTransaction.daily_rate)
                       : `${viewingTransaction.daily_rate} kg`}
                   </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Jenis Pembayaran</p>
+                  <Badge variant="outline">
+                    {viewingTransaction.payment_type === "cash" ? "Uang" : "Makanan"}
+                  </Badge>
                 </div>
                 <div className="col-span-2">
                   <p className="text-muted-foreground">Total</p>

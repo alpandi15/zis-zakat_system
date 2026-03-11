@@ -206,6 +206,7 @@ export type Database = {
           missed_days: number
           notes: string | null
           payer_address: string | null
+          payer_member_id: string | null
           payer_muzakki_id: string | null
           payer_name: string
           payer_phone: string | null
@@ -231,6 +232,7 @@ export type Database = {
           missed_days: number
           notes?: string | null
           payer_address?: string | null
+          payer_member_id?: string | null
           payer_muzakki_id?: string | null
           payer_name: string
           payer_phone?: string | null
@@ -256,6 +258,7 @@ export type Database = {
           missed_days?: number
           notes?: string | null
           payer_address?: string | null
+          payer_member_id?: string | null
           payer_muzakki_id?: string | null
           payer_name?: string
           payer_phone?: string | null
@@ -268,6 +271,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "fidyah_transactions_payer_member_id_fkey"
+            columns: ["payer_member_id"]
+            isOneToOne: false
+            referencedRelation: "muzakki_members"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "fidyah_transactions_payer_muzakki_id_fkey"
             columns: ["payer_muzakki_id"]
@@ -460,6 +470,7 @@ export type Database = {
           created_by: string | null
           id: string
           is_active: boolean
+          is_dependent: boolean
           muzakki_id: string
           name: string
           notes: string | null
@@ -472,6 +483,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           is_active?: boolean
+          is_dependent?: boolean
           muzakki_id: string
           name: string
           notes?: string | null
@@ -484,6 +496,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           is_active?: boolean
+          is_dependent?: boolean
           muzakki_id?: string
           name?: string
           notes?: string | null
@@ -816,6 +829,7 @@ export type Database = {
           inventory_value: number | null
           is_above_nisab: boolean
           is_manually_overridden: boolean
+          muzakki_member_id: string | null
           muzakki_id: string
           net_amount: number
           nisab_gold_price_per_gram: number | null
@@ -846,6 +860,7 @@ export type Database = {
           inventory_value?: number | null
           is_above_nisab?: boolean
           is_manually_overridden?: boolean
+          muzakki_member_id?: string | null
           muzakki_id: string
           net_amount: number
           nisab_gold_price_per_gram?: number | null
@@ -876,6 +891,7 @@ export type Database = {
           inventory_value?: number | null
           is_above_nisab?: boolean
           is_manually_overridden?: boolean
+          muzakki_member_id?: string | null
           muzakki_id?: string
           net_amount?: number
           nisab_gold_price_per_gram?: number | null
@@ -893,6 +909,13 @@ export type Database = {
           zakat_type?: Database["public"]["Enums"]["zakat_mal_type"]
         }
         Relationships: [
+          {
+            foreignKeyName: "zakat_mal_transactions_muzakki_member_id_fkey"
+            columns: ["muzakki_member_id"]
+            isOneToOne: false
+            referencedRelation: "muzakki_members"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "zakat_mal_transactions_muzakki_id_fkey"
             columns: ["muzakki_id"]

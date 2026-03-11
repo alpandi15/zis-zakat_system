@@ -31,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Check, ChevronsUpDown, Plus, Trash2 } from "lucide-react";
@@ -54,6 +55,7 @@ interface MemberInput {
   id: string;
   name: string;
   relationship: string;
+  is_dependent: boolean;
 }
 
 const RELATIONSHIP_OPTIONS = [
@@ -82,7 +84,7 @@ export function MuzakkiSearchSelect({
     notes: "",
   });
   const [members, setMembers] = useState<MemberInput[]>([
-    { id: crypto.randomUUID(), name: "", relationship: "head_of_family" },
+    { id: crypto.randomUUID(), name: "", relationship: "head_of_family", is_dependent: true },
   ]);
 
   const { toast } = useToast();
@@ -138,6 +140,7 @@ export function MuzakkiSearchSelect({
               muzakki_id: newMuzakki.id,
               name: m.name.trim(),
               relationship: m.relationship as "head_of_family" | "wife" | "child" | "parent",
+              is_dependent: m.is_dependent,
             }))
           );
         if (membersError) throw membersError;
@@ -162,7 +165,7 @@ export function MuzakkiSearchSelect({
   const resetForm = () => {
     setStep(1);
     setMuzakkiData({ name: "", phone: "", address: "", notes: "" });
-    setMembers([{ id: crypto.randomUUID(), name: "", relationship: "head_of_family" }]);
+    setMembers([{ id: crypto.randomUUID(), name: "", relationship: "head_of_family", is_dependent: true }]);
   };
 
   const handleOpenCreate = () => {
@@ -173,7 +176,7 @@ export function MuzakkiSearchSelect({
   };
 
   const addMember = () => {
-    setMembers([...members, { id: crypto.randomUUID(), name: "", relationship: "child" }]);
+    setMembers([...members, { id: crypto.randomUUID(), name: "", relationship: "child", is_dependent: true }]);
   };
 
   const removeMember = (id: string) => {
@@ -341,11 +344,11 @@ export function MuzakkiSearchSelect({
                         </Button>
                       )}
                     </div>
-                    <div className="grid gap-2 grid-cols-2">
-                      <Input
-                        value={member.name}
-                        onChange={(e) => updateMember(member.id, "name", e.target.value)}
-                        placeholder="Nama"
+	                    <div className="grid gap-2 grid-cols-2">
+	                      <Input
+	                        value={member.name}
+	                        onChange={(e) => updateMember(member.id, "name", e.target.value)}
+	                        placeholder="Nama"
                       />
                       <Select
                         value={member.relationship}
@@ -360,11 +363,22 @@ export function MuzakkiSearchSelect({
                               {opt.label}
                             </SelectItem>
                           ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                ))}
+	                        </SelectContent>
+	                      </Select>
+	                    </div>
+	                    <div className="flex items-center justify-between rounded-md border p-2">
+	                      <Label className="text-xs">Termasuk Tanggungan</Label>
+	                      <Switch
+	                        checked={member.is_dependent}
+	                        onCheckedChange={(checked) =>
+	                          setMembers((prev) =>
+	                            prev.map((m) => (m.id === member.id ? { ...m, is_dependent: checked } : m))
+	                          )
+	                        }
+	                      />
+	                    </div>
+	                  </div>
+	                ))}
               </div>
               <Button type="button" variant="outline" onClick={addMember} className="w-full gap-1">
                 <Plus className="h-4 w-4" />

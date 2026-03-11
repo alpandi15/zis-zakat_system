@@ -46,6 +46,7 @@ interface MuzakkiMember {
   birth_date: string | null;
   notes: string | null;
   is_active: boolean;
+  is_dependent: boolean;
 }
 
 interface ZakatFitrahItem {
@@ -86,6 +87,7 @@ export default function MuzakkiDetail() {
     relationship: "child" as string,
     birth_date: "",
     notes: "",
+    is_dependent: true,
   });
 
   // Fetch Muzakki details
@@ -151,6 +153,7 @@ export default function MuzakkiDetail() {
         relationship: data.relationship as "head_of_family" | "wife" | "child" | "parent",
         birth_date: data.birth_date || null,
         notes: data.notes || null,
+        is_dependent: data.is_dependent,
       });
       if (error) throw error;
     },
@@ -175,6 +178,7 @@ export default function MuzakkiDetail() {
           relationship: data.relationship as "head_of_family" | "wife" | "child" | "parent",
           birth_date: data.birth_date || null,
           notes: data.notes || null,
+          is_dependent: data.is_dependent,
           ...(data.is_active !== undefined && { is_active: data.is_active }),
         })
         .eq("id", data.id);
@@ -199,12 +203,19 @@ export default function MuzakkiDetail() {
       relationship: member.relationship,
       birth_date: member.birth_date || "",
       notes: member.notes || "",
+      is_dependent: member.is_dependent,
       is_active: !member.is_active,
     });
   };
 
   const resetMemberForm = () => {
-    setMemberForm({ name: "", relationship: "child", birth_date: "", notes: "" });
+    setMemberForm({
+      name: "",
+      relationship: "child",
+      birth_date: "",
+      notes: "",
+      is_dependent: true,
+    });
   };
 
   const handleEditMember = (member: MuzakkiMember) => {
@@ -214,6 +225,7 @@ export default function MuzakkiDetail() {
       relationship: member.relationship,
       birth_date: member.birth_date || "",
       notes: member.notes || "",
+      is_dependent: member.is_dependent,
     });
   };
 
@@ -323,6 +335,7 @@ export default function MuzakkiDetail() {
                     <TableHead>Nama</TableHead>
                     <TableHead>Hubungan</TableHead>
                     <TableHead>Tanggal Lahir</TableHead>
+                    <TableHead>Tanggungan</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Aksi</TableHead>
                   </TableRow>
@@ -340,6 +353,11 @@ export default function MuzakkiDetail() {
                         {member.birth_date
                           ? format(new Date(member.birth_date), "dd MMM yyyy", { locale: idLocale })
                           : "-"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={member.is_dependent ? "default" : "secondary"}>
+                          {member.is_dependent ? "Ya" : "Tidak"}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <Badge variant={member.is_active ? "default" : "secondary"}>
@@ -452,6 +470,19 @@ export default function MuzakkiDetail() {
                 value={memberForm.notes}
                 onChange={(e) => setMemberForm({ ...memberForm, notes: e.target.value })}
                 placeholder="Catatan tambahan"
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div>
+                <Label htmlFor="member_is_dependent">Termasuk Tanggungan</Label>
+                <p className="text-xs text-muted-foreground">
+                  Anggota tanggungan akan muncul di transaksi zakat fitrah.
+                </p>
+              </div>
+              <Switch
+                id="member_is_dependent"
+                checked={memberForm.is_dependent}
+                onCheckedChange={(checked) => setMemberForm({ ...memberForm, is_dependent: checked })}
               />
             </div>
             <div className="flex justify-end gap-2">
