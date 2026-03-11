@@ -1,5 +1,80 @@
 # Welcome to your Lovable project
 
+## Supabase bootstrap admin
+
+Setelah migration dijalankan, akun admin bootstrap otomatis dibuat jika belum ada `super_admin`:
+
+- Email: `admin@zakatku.local`
+- Password: `Admin123!`
+
+Command:
+
+```sh
+npx supabase login
+npx supabase link --project-ref gezamfqxzdouqfbsqjgv
+npx supabase db push
+```
+
+Setelah login pertama, ganti password akun admin dari Supabase Auth/User Management.
+
+Jika muncul error login:
+`{"code":"unexpected_failure","message":"Database error querying schema"}`
+jalankan lagi:
+
+```sh
+npx supabase db push
+```
+
+Karena ada migration perbaikan auth bootstrap yang akan menyinkronkan kolom `auth.users` dan `auth.identities`.
+
+## Supabase migration ops (rollback/reset)
+
+Peringatan: command di bawah bersifat destruktif jika pakai `--linked` (remote project).
+
+Backup dulu sebelum rollback/reset:
+
+```sh
+npx supabase db dump --linked -f backup_full.sql
+npx supabase db dump --linked --role-only -f backup_roles.sql
+```
+
+Cek status migration local vs remote:
+
+```sh
+npx supabase migration list --linked
+```
+
+Rollback migration terakhir di remote:
+
+```sh
+npx supabase migration down --linked --last 1 --yes
+```
+
+Rollback beberapa migration di remote (contoh 2):
+
+```sh
+npx supabase migration down --linked --last 2 --yes
+```
+
+Apply ulang migration setelah rollback:
+
+```sh
+npx supabase db push --linked --yes
+```
+
+Reset total remote DB (hapus semua data termasuk auth/users, lalu apply ulang migration):
+
+```sh
+npx supabase db reset --linked --yes
+```
+
+Untuk local DB:
+
+```sh
+npx supabase start
+npx supabase db reset --local
+```
+
 ## Project info
 
 **URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
