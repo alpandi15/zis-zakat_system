@@ -116,6 +116,155 @@ export type Database = {
           },
         ]
       }
+      distribution_calculation_batch_items: {
+        Row: {
+          asnaf_code: string | null
+          batch_id: string
+          cash_amount: number
+          created_at: string
+          food_amount_kg: number
+          fund_category: Database["public"]["Enums"]["fund_category"]
+          id: string
+          is_amil: boolean
+          mustahik_id: string
+          period_id: string
+          priority: Database["public"]["Enums"]["priority_level"] | null
+          rice_amount_kg: number
+        }
+        Insert: {
+          asnaf_code?: string | null
+          batch_id: string
+          cash_amount?: number
+          created_at?: string
+          food_amount_kg?: number
+          fund_category: Database["public"]["Enums"]["fund_category"]
+          id?: string
+          is_amil?: boolean
+          mustahik_id: string
+          period_id: string
+          priority?: Database["public"]["Enums"]["priority_level"] | null
+          rice_amount_kg?: number
+        }
+        Update: {
+          asnaf_code?: string | null
+          batch_id?: string
+          cash_amount?: number
+          created_at?: string
+          food_amount_kg?: number
+          fund_category?: Database["public"]["Enums"]["fund_category"]
+          id?: string
+          is_amil?: boolean
+          mustahik_id?: string
+          period_id?: string
+          priority?: Database["public"]["Enums"]["priority_level"] | null
+          rice_amount_kg?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "distribution_calculation_batch_items_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "distribution_calculation_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "distribution_calculation_batch_items_mustahik_id_fkey"
+            columns: ["mustahik_id"]
+            isOneToOne: false
+            referencedRelation: "mustahik"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "distribution_calculation_batch_items_period_id_fkey"
+            columns: ["period_id"]
+            isOneToOne: false
+            referencedRelation: "periods"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      distribution_calculation_batches: {
+        Row: {
+          amil_distribution_mode: string
+          amil_share_factor: number
+          batch_code: string
+          batch_no: number
+          created_at: string
+          distributed_at: string | null
+          distributed_by: string | null
+          id: string
+          locked_at: string
+          locked_by: string | null
+          notes: string | null
+          period_id: string
+          status: string
+          total_allocated_cash: number
+          total_allocated_food_kg: number
+          total_allocated_rice_kg: number
+          updated_at: string
+        }
+        Insert: {
+          amil_distribution_mode?: string
+          amil_share_factor?: number
+          batch_code?: string
+          batch_no?: number
+          created_at?: string
+          distributed_at?: string | null
+          distributed_by?: string | null
+          id?: string
+          locked_at?: string
+          locked_by?: string | null
+          notes?: string | null
+          period_id: string
+          status?: string
+          total_allocated_cash?: number
+          total_allocated_food_kg?: number
+          total_allocated_rice_kg?: number
+          updated_at?: string
+        }
+        Update: {
+          amil_distribution_mode?: string
+          amil_share_factor?: number
+          batch_code?: string
+          batch_no?: number
+          created_at?: string
+          distributed_at?: string | null
+          distributed_by?: string | null
+          id?: string
+          locked_at?: string
+          locked_by?: string | null
+          notes?: string | null
+          period_id?: string
+          status?: string
+          total_allocated_cash?: number
+          total_allocated_food_kg?: number
+          total_allocated_rice_kg?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "distribution_calculation_batches_distributed_by_fkey"
+            columns: ["distributed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "distribution_calculation_batches_locked_by_fkey"
+            columns: ["locked_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "distribution_calculation_batches_period_id_fkey"
+            columns: ["period_id"]
+            isOneToOne: false
+            referencedRelation: "periods"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       fidyah_distributions: {
         Row: {
           approved_at: string | null
@@ -196,6 +345,7 @@ export type Database = {
           beneficiary_name: string | null
           beneficiary_relationship: string | null
           cash_amount: number | null
+          correction_of_transaction_id: string | null
           created_at: string
           created_by: string | null
           daily_rate: number
@@ -203,6 +353,8 @@ export type Database = {
           food_type: string | null
           id: string
           is_paying_for_self: boolean
+          is_void: boolean
+          locked_batch_id: string | null
           missed_days: number
           notes: string | null
           payer_address: string | null
@@ -215,13 +367,18 @@ export type Database = {
           reason: Database["public"]["Enums"]["fidyah_reason"]
           reason_notes: string | null
           total_amount: number
+          transaction_no: number
           transaction_date: string
           updated_at: string
+          void_reason: string | null
+          voided_at: string | null
+          voided_by: string | null
         }
         Insert: {
           beneficiary_name?: string | null
           beneficiary_relationship?: string | null
           cash_amount?: number | null
+          correction_of_transaction_id?: string | null
           created_at?: string
           created_by?: string | null
           daily_rate: number
@@ -229,6 +386,8 @@ export type Database = {
           food_type?: string | null
           id?: string
           is_paying_for_self?: boolean
+          is_void?: boolean
+          locked_batch_id?: string | null
           missed_days: number
           notes?: string | null
           payer_address?: string | null
@@ -241,13 +400,18 @@ export type Database = {
           reason: Database["public"]["Enums"]["fidyah_reason"]
           reason_notes?: string | null
           total_amount: number
+          transaction_no?: number
           transaction_date?: string
           updated_at?: string
+          void_reason?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
         }
         Update: {
           beneficiary_name?: string | null
           beneficiary_relationship?: string | null
           cash_amount?: number | null
+          correction_of_transaction_id?: string | null
           created_at?: string
           created_by?: string | null
           daily_rate?: number
@@ -255,6 +419,8 @@ export type Database = {
           food_type?: string | null
           id?: string
           is_paying_for_self?: boolean
+          is_void?: boolean
+          locked_batch_id?: string | null
           missed_days?: number
           notes?: string | null
           payer_address?: string | null
@@ -267,10 +433,28 @@ export type Database = {
           reason?: Database["public"]["Enums"]["fidyah_reason"]
           reason_notes?: string | null
           total_amount?: number
+          transaction_no?: number
           transaction_date?: string
           updated_at?: string
+          void_reason?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "fidyah_transactions_correction_of_transaction_id_fkey"
+            columns: ["correction_of_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "fidyah_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fidyah_transactions_locked_batch_id_fkey"
+            columns: ["locked_batch_id"]
+            isOneToOne: false
+            referencedRelation: "distribution_calculation_batches"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "fidyah_transactions_payer_member_id_fkey"
             columns: ["payer_member_id"]
@@ -290,6 +474,13 @@ export type Database = {
             columns: ["period_id"]
             isOneToOne: false
             referencedRelation: "periods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fidyah_transactions_voided_by_fkey"
+            columns: ["voided_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -709,29 +900,35 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          is_void: boolean
           money_amount: number | null
           muzakki_member_id: string
           period_id: string
           rice_amount_kg: number | null
           transaction_id: string
+          voided_at: string | null
         }
         Insert: {
           created_at?: string
           id?: string
+          is_void?: boolean
           money_amount?: number | null
           muzakki_member_id: string
           period_id: string
           rice_amount_kg?: number | null
           transaction_id: string
+          voided_at?: string | null
         }
         Update: {
           created_at?: string
           id?: string
+          is_void?: boolean
           money_amount?: number | null
           muzakki_member_id?: string
           period_id?: string
           rice_amount_kg?: number | null
           transaction_id?: string
+          voided_at?: string | null
         }
         Relationships: [
           {
@@ -759,10 +956,13 @@ export type Database = {
       }
       zakat_fitrah_transactions: {
         Row: {
+          correction_of_transaction_id: string | null
           created_at: string
           created_by: string | null
           id: string
           is_custom_total_rice: boolean
+          is_void: boolean
+          locked_batch_id: string | null
           money_amount: number | null
           muzakki_id: string
           notes: string | null
@@ -771,14 +971,21 @@ export type Database = {
           rice_amount_kg: number | null
           rice_price_per_kg: number | null
           total_members: number
+          transaction_no: number
           transaction_date: string
           updated_at: string
+          void_reason: string | null
+          voided_at: string | null
+          voided_by: string | null
         }
         Insert: {
+          correction_of_transaction_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
           is_custom_total_rice?: boolean
+          is_void?: boolean
+          locked_batch_id?: string | null
           money_amount?: number | null
           muzakki_id: string
           notes?: string | null
@@ -787,14 +994,21 @@ export type Database = {
           rice_amount_kg?: number | null
           rice_price_per_kg?: number | null
           total_members?: number
+          transaction_no?: number
           transaction_date?: string
           updated_at?: string
+          void_reason?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
         }
         Update: {
+          correction_of_transaction_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
           is_custom_total_rice?: boolean
+          is_void?: boolean
+          locked_batch_id?: string | null
           money_amount?: number | null
           muzakki_id?: string
           notes?: string | null
@@ -803,10 +1017,28 @@ export type Database = {
           rice_amount_kg?: number | null
           rice_price_per_kg?: number | null
           total_members?: number
+          transaction_no?: number
           transaction_date?: string
           updated_at?: string
+          void_reason?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "zakat_fitrah_transactions_correction_of_transaction_id_fkey"
+            columns: ["correction_of_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "zakat_fitrah_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "zakat_fitrah_transactions_locked_batch_id_fkey"
+            columns: ["locked_batch_id"]
+            isOneToOne: false
+            referencedRelation: "distribution_calculation_batches"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "zakat_fitrah_transactions_muzakki_id_fkey"
             columns: ["muzakki_id"]
@@ -821,11 +1053,19 @@ export type Database = {
             referencedRelation: "periods"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "zakat_fitrah_transactions_voided_by_fkey"
+            columns: ["voided_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
         ]
       }
       zakat_mal_transactions: {
         Row: {
           calculated_zakat: number
+          correction_of_transaction_id: string | null
           created_at: string
           created_by: string | null
           deductions: number | null
@@ -838,6 +1078,8 @@ export type Database = {
           inventory_value: number | null
           is_above_nisab: boolean
           is_manually_overridden: boolean
+          is_void: boolean
+          locked_batch_id: string | null
           muzakki_member_id: string | null
           muzakki_id: string
           net_amount: number
@@ -850,13 +1092,18 @@ export type Database = {
           payment_method: string | null
           period_id: string
           receivables: number | null
+          transaction_no: number
           transaction_date: string
           updated_at: string
+          void_reason: string | null
+          voided_at: string | null
+          voided_by: string | null
           zakat_percentage: number
           zakat_type: Database["public"]["Enums"]["zakat_mal_type"]
         }
         Insert: {
           calculated_zakat: number
+          correction_of_transaction_id?: string | null
           created_at?: string
           created_by?: string | null
           deductions?: number | null
@@ -869,6 +1116,8 @@ export type Database = {
           inventory_value?: number | null
           is_above_nisab?: boolean
           is_manually_overridden?: boolean
+          is_void?: boolean
+          locked_batch_id?: string | null
           muzakki_member_id?: string | null
           muzakki_id: string
           net_amount: number
@@ -881,13 +1130,18 @@ export type Database = {
           payment_method?: string | null
           period_id: string
           receivables?: number | null
+          transaction_no?: number
           transaction_date?: string
           updated_at?: string
+          void_reason?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
           zakat_percentage?: number
           zakat_type: Database["public"]["Enums"]["zakat_mal_type"]
         }
         Update: {
           calculated_zakat?: number
+          correction_of_transaction_id?: string | null
           created_at?: string
           created_by?: string | null
           deductions?: number | null
@@ -900,6 +1154,8 @@ export type Database = {
           inventory_value?: number | null
           is_above_nisab?: boolean
           is_manually_overridden?: boolean
+          is_void?: boolean
+          locked_batch_id?: string | null
           muzakki_member_id?: string | null
           muzakki_id?: string
           net_amount?: number
@@ -912,12 +1168,30 @@ export type Database = {
           payment_method?: string | null
           period_id?: string
           receivables?: number | null
+          transaction_no?: number
           transaction_date?: string
           updated_at?: string
+          void_reason?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
           zakat_percentage?: number
           zakat_type?: Database["public"]["Enums"]["zakat_mal_type"]
         }
         Relationships: [
+          {
+            foreignKeyName: "zakat_mal_transactions_correction_of_transaction_id_fkey"
+            columns: ["correction_of_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "zakat_mal_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "zakat_mal_transactions_locked_batch_id_fkey"
+            columns: ["locked_batch_id"]
+            isOneToOne: false
+            referencedRelation: "distribution_calculation_batches"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "zakat_mal_transactions_muzakki_member_id_fkey"
             columns: ["muzakki_member_id"]
@@ -937,6 +1211,13 @@ export type Database = {
             columns: ["period_id"]
             isOneToOne: false
             referencedRelation: "periods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "zakat_mal_transactions_voided_by_fkey"
+            columns: ["voided_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -1009,6 +1290,7 @@ export type Database = {
       app_role:
         | "super_admin"
         | "chairman"
+        | "secretary"
         | "treasurer"
         | "zakat_officer"
         | "fidyah_officer"
@@ -1178,6 +1460,7 @@ export const Constants = {
       app_role: [
         "super_admin",
         "chairman",
+        "secretary",
         "treasurer",
         "zakat_officer",
         "fidyah_officer",

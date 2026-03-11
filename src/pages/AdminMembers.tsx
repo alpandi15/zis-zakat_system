@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { createClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { DataTable, Column } from "@/components/shared/DataTable";
 import { Button } from "@/components/ui/button";
@@ -29,6 +31,9 @@ import {
   ADMIN_ROLES, 
 } from "@/lib/roles";
 
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "";
+
 interface UserWithRole {
   id: string;
   email: string | null;
@@ -38,7 +43,14 @@ interface UserWithRole {
 }
 
 // Roles that can be assigned by admins (excludes super_admin which is protected)
-const ASSIGNABLE_ROLES: AppRole[] = ["chairman", "treasurer", "zakat_officer", "fidyah_officer", "viewer"];
+const ASSIGNABLE_ROLES: AppRole[] = [
+  "chairman",
+  "secretary",
+  "treasurer",
+  "zakat_officer",
+  "fidyah_officer",
+  "viewer",
+];
 
 export default function AdminMembers() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -56,7 +68,7 @@ export default function AdminMembers() {
   const { hasRole } = useAuth();
   const queryClient = useQueryClient();
   
-  const isSuperAdmin = hasRole('super_admin');
+  const canManageUsers = hasRole("super_admin");
 
   // Fetch all users with their roles
   const { data: users = [], isLoading } = useQuery({
@@ -83,6 +95,7 @@ export default function AdminMembers() {
         // Get highest priority role
         const primaryRole = userRoles.find((r) => r.role === "super_admin")?.role ||
           userRoles.find((r) => r.role === "chairman")?.role ||
+          userRoles.find((r) => r.role === "secretary")?.role ||
           userRoles.find((r) => r.role === "treasurer")?.role ||
           userRoles.find((r) => r.role === "zakat_officer")?.role ||
           userRoles.find((r) => r.role === "fidyah_officer")?.role ||
@@ -98,7 +111,7 @@ export default function AdminMembers() {
         };
       });
     },
-    enabled: isSuperAdmin,
+    enabled: canManageUsers,
   });
 
   const updateRoleMutation = useMutation({
@@ -142,45 +155,119 @@ export default function AdminMembers() {
       full_name: string;
       role: AppRole;
     }) => {
+      const parseEdgeError = async (error: Error & { context?: unknown }) => {
+        const parsed = {
+          message: error.message,
+          code: "",
+          notFound: false,
+          networkFailure: error.message.includes("Failed to send a request to the Edge Function"),
+        };
+
+        try {
+          const res = error.context;
+          if (res instanceof Response) {
+            const payload = await res.json().catch(() => null);
+            if (payload && typeof payload === "object") {
+              const payloadCode = "code" in payload && typeof payload.code === "string" ? payload.code : "";
+              const payloadMessage = "error" in payload && typeof payload.error === "string" ? payload.error : "";
+              parsed.code = payloadCode;
+              parsed.message = payloadMessage || parsed.message;
+              parsed.notFound = payloadCode === "NOT_FOUND" || res.status === 404;
+            }
+          }
+        } catch {
+          // Keep best-effort parsed value.
+        }
+
+        return parsed;
+      };
+
+      const updateUserRole = async (createdUserId: string) => {
+        const { error: deleteError } = await supabase
+          .from("user_roles")
+          .delete()
+          .eq("user_id", createdUserId)
+          .neq("role", "super_admin");
+
+        if (deleteError) throw deleteError;
+
+        const { error: roleInsertError } = await supabase
+          .from("user_roles")
+          .insert({ user_id: createdUserId, role });
+
+        if (roleInsertError) throw roleInsertError;
+      };
+
+      // Primary path: Edge Function (recommended for immediate confirmed account)
       const { data, error } = await supabase.functions.invoke("create-user", {
         body: { email, password, full_name, role },
       });
 
-      if (error) {
-        // Prefer the structured JSON error from the function when available.
-        const errWithContext = error as Error & { context?: unknown };
-        try {
-          const res = errWithContext.context;
-          if (res instanceof Response) {
-            const payload = await res.json().catch(() => null);
-            const msg =
-              payload &&
-              typeof payload === "object" &&
-              "error" in payload &&
-              typeof payload.error === "string"
-                ? payload.error
-                : undefined;
-            if (typeof msg === "string" && msg.trim()) {
-              throw new Error(msg);
-            }
-          }
-        } catch (e) {
-          // If parsing fails, fall back to the original error message.
-          if (e instanceof Error) throw e;
-        }
-        throw new Error(error.message);
+      if (!error) {
+        if (data?.error) throw new Error(data.error);
+        return data;
       }
 
-      if (data?.error) throw new Error(data.error);
-      return data;
+      const edgeError = await parseEdgeError(error as Error & { context?: unknown });
+
+      // Fallback path: direct signUp when function isn't reachable/not deployed.
+      if (edgeError.notFound || edgeError.networkFailure) {
+        if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+          throw new Error(
+            "Edge Function create-user tidak tersedia, dan konfigurasi fallback Supabase client tidak lengkap.",
+          );
+        }
+
+        const isolatedClient = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+          },
+        });
+
+        const { data: signUpData, error: signUpError } = await isolatedClient.auth.signUp({
+          email,
+          password,
+          options: { data: { full_name } },
+        });
+
+        if (signUpError) throw signUpError;
+
+        const createdUserId = signUpData.user?.id;
+        if (!createdUserId) {
+          throw new Error("User berhasil dibuat tapi ID user tidak ditemukan");
+        }
+
+        // Ensure profile name is populated.
+        const { error: profileUpdateError } = await supabase
+          .from("profiles")
+          .update({ full_name })
+          .eq("id", createdUserId);
+        if (profileUpdateError) throw profileUpdateError;
+
+        await updateUserRole(createdUserId);
+
+        return {
+          success: true,
+          user: { id: createdUserId, email },
+          message:
+            "User berhasil dibuat via fallback signUp. Jika email confirmation aktif, user perlu verifikasi email dulu.",
+          usedFallback: true,
+        };
+      }
+
+      throw new Error(edgeError.message || "Gagal membuat user");
     },
-    onSuccess: () => {
+    onSuccess: (result: { usedFallback?: boolean } | undefined) => {
       queryClient.invalidateQueries({ queryKey: ["admin-members"] });
       setIsAddDialogOpen(false);
       resetAddForm();
       toast({ 
         title: "Pengguna berhasil dibuat",
-        description: "Pengguna dapat langsung login dengan email dan password yang diberikan."
+        description: result?.usedFallback
+          ? "Pengguna dibuat via fallback signUp. Jika konfirmasi email aktif di Supabase, user perlu verifikasi email."
+          : "Pengguna dapat langsung login dengan email dan password yang diberikan."
       });
     },
     onError: (error: Error) => {
@@ -189,6 +276,8 @@ export default function AdminMembers() {
         ? "User already exists"
         : msg.includes("at least 6")
         ? "Password must be at least 6 characters"
+        : msg.includes("Edge Function")
+        ? "Edge Function create-user belum tersedia. Jalankan: supabase functions deploy create-user"
         : msg;
       toast({ variant: "destructive", title: "Failed to create user", description: message });
     },
@@ -280,8 +369,8 @@ export default function AdminMembers() {
     },
   ];
 
-  // Only super_admin can access
-  if (!isSuperAdmin) {
+  // Super-admin-equivalent roles can access
+  if (!canManageUsers) {
     return (
       <AppLayout title="Akses Ditolak">
         <div className="flex flex-col items-center justify-center py-12">

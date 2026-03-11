@@ -39,6 +39,7 @@ export type AmilDistributionMode = "percentage" | "proportional_with_factor";
 interface DistributionCalculationOptions {
   amilDistributionMode?: AmilDistributionMode;
   amilShareFactor?: number;
+  excludeExistingDistributed?: boolean;
 }
 
 // Distribution priority weights
@@ -76,6 +77,7 @@ export function useDistributionCalculation(
     const AMIL_PERCENTAGE = (amilSetting?.distribution_percentage || 12.5) / 100;
     const amilDistributionMode: AmilDistributionMode = options?.amilDistributionMode || "percentage";
     const amilShareFactor = Math.max(0, Math.min(1, options?.amilShareFactor ?? 0.5));
+    const excludeExistingDistributed = options?.excludeExistingDistributed ?? true;
 
     // Separate Amil from other mustahik
     const amilList = mustahikList.filter(m => getAsnafCode(m) === "amil");
@@ -108,14 +110,16 @@ export function useDistributionCalculation(
 
     // Get distributed mustahik IDs per category
     const distributedByCategory: Record<string, Set<string>> = {};
-    existingDistributions
-      .filter(d => d.status === "distributed" || d.status === "approved")
-      .forEach(d => {
-        if (!distributedByCategory[d.fund_category]) {
-          distributedByCategory[d.fund_category] = new Set();
-        }
-        distributedByCategory[d.fund_category].add(d.mustahik_id);
-      });
+    if (excludeExistingDistributed) {
+      existingDistributions
+        .filter(d => d.status === "distributed" || d.status === "approved")
+        .forEach(d => {
+          if (!distributedByCategory[d.fund_category]) {
+            distributedByCategory[d.fund_category] = new Set();
+          }
+          distributedByCategory[d.fund_category].add(d.mustahik_id);
+        });
+    }
 
     // Calculate available amounts per category
     const getAvailableBalance = (category: string) => {
@@ -451,7 +455,16 @@ export function useDistributionCalculation(
         amilDistributionMode,
         amilShareFactor,
         amilPercentage: AMIL_PERCENTAGE,
+        excludeExistingDistributed,
       },
     };
-  }, [mustahikList, fundBalances, existingDistributions, asnafSettings, options?.amilDistributionMode, options?.amilShareFactor]);
+  }, [
+    mustahikList,
+    fundBalances,
+    existingDistributions,
+    asnafSettings,
+    options?.amilDistributionMode,
+    options?.amilShareFactor,
+    options?.excludeExistingDistributed,
+  ]);
 }

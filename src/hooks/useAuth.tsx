@@ -1,7 +1,13 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-import { AppRole, ADMIN_ROLES, canManagePeriods, canManageData } from '@/lib/roles';
+import {
+  AppRole,
+  ADMIN_ROLES,
+  SUPER_ADMIN_EQUIVALENT_ROLES,
+  canManagePeriods,
+  canManageData,
+} from '@/lib/roles';
 
 // Re-export AppRole for backward compatibility
 export type { AppRole } from '@/lib/roles';
@@ -129,10 +135,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setRoles([]);
   };
 
-  const hasRole = (role: AppRole) => roles.includes(role);
+  const hasRole = (role: AppRole) => {
+    if (role === "super_admin") {
+      return roles.some((currentRole) => SUPER_ADMIN_EQUIVALENT_ROLES.includes(currentRole));
+    }
 
-  const hasAnyRole = (checkRoles: AppRole[]) => 
-    checkRoles.some(role => roles.includes(role));
+    return roles.includes(role);
+  };
+
+  const hasAnyRole = (checkRoles: AppRole[]) => checkRoles.some((role) => hasRole(role));
 
   const isAdmin = () => hasAnyRole(ADMIN_ROLES);
   

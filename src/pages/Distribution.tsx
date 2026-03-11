@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -72,6 +72,32 @@ interface FundBalance {
   total_food_kg: number;
 }
 
+interface CalculationBatch {
+  id: string;
+  batch_no: number;
+  batch_code: string;
+  status: string;
+  locked_at: string;
+  notes: string | null;
+  total_allocated_cash: number;
+  total_allocated_rice_kg: number;
+  total_allocated_food_kg: number;
+}
+
+interface CalculationBatchItem {
+  id: string;
+  batch_id: string;
+  period_id: string;
+  mustahik_id: string;
+  fund_category: FundCategory;
+  is_amil: boolean;
+  asnaf_code: string | null;
+  priority: string | null;
+  cash_amount: number;
+  rice_amount_kg: number;
+  food_amount_kg: number;
+}
+
 type DistributionTab = "distribution" | "assignment";
 type FundCategory = Enums<"fund_category">;
 type DistributionStatus = Enums<"distribution_status">;
@@ -82,6 +108,12 @@ const normalizeAmilMode = (mode: string | null | undefined): AmilDistributionMod
 const normalizeAmilShareFactor = (factor: number | null | undefined): number => {
   if (typeof factor !== "number" || Number.isNaN(factor)) return 0.5;
   return Math.max(0, Math.min(1, factor));
+};
+
+const BATCH_STATUS_LABELS: Record<string, string> = {
+  locked: "Terkunci",
+  distributed: "Sudah Disalurkan",
+  cancelled: "Dibatalkan",
 };
 
 export default function Distribution() {
@@ -96,6 +128,7 @@ export default function Distribution() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewCategory, setPreviewCategory] = useState<FundCategory | "">("");
   const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
+  const [selectedBatchId, setSelectedBatchId] = useState<string>("");
 
   const allCategories: FundCategory[] = ["zakat_fitrah_cash", "zakat_fitrah_rice", "zakat_mal", "fidyah_cash", "fidyah_food"];
 
@@ -113,6 +146,43 @@ export default function Distribution() {
       return data as FundBalance[];
     },
     enabled: !!selectedPeriod?.id,
+  });
+
+  const { data: lockedBatches = [] } = useQuery({
+    queryKey: ["distribution-calculation-batches", selectedPeriod?.id],
+    queryFn: async () => {
+      if (!selectedPeriod?.id) return [];
+
+      const { data, error } = await supabase
+        .from("distribution_calculation_batches")
+        .select(
+          "id, batch_no, batch_code, status, locked_at, notes, total_allocated_cash, total_allocated_rice_kg, total_allocated_food_kg",
+        )
+        .eq("period_id", selectedPeriod.id)
+        .order("batch_no", { ascending: false });
+
+      if (error) throw error;
+      return data as CalculationBatch[];
+    },
+    enabled: !!selectedPeriod?.id,
+  });
+
+  const { data: selectedBatchItems = [] } = useQuery({
+    queryKey: ["distribution-calculation-batch-items", selectedBatchId],
+    queryFn: async () => {
+      if (!selectedBatchId) return [];
+
+      const { data, error } = await supabase
+        .from("distribution_calculation_batch_items")
+        .select("*")
+        .eq("batch_id", selectedBatchId)
+        .order("fund_category")
+        .order("is_amil", { ascending: false });
+
+      if (error) throw error;
+      return data as CalculationBatchItem[];
+    },
+    enabled: !!selectedBatchId,
   });
 
   const { data: distributionAssignments = [] } = useQuery({
@@ -182,6 +252,18 @@ export default function Distribution() {
     return mergedDistributions.filter((d) => d.fund_category === categoryFilter);
   }, [categoryFilter, mergedDistributions]);
 
+  const selectedBatch = useMemo(
+    () => lockedBatches.find((batch) => batch.id === selectedBatchId) || null,
+    [lockedBatches, selectedBatchId],
+  );
+
+  useEffect(() => {
+    if (!selectedBatchId && lockedBatches.length > 0) {
+      const firstLocked = lockedBatches.find((batch) => batch.status === "locked") || lockedBatches[0];
+      setSelectedBatchId(firstLocked.id);
+    }
+  }, [lockedBatches, selectedBatchId]);
+
   const { data: mustahikList = [] } = useQuery({
     queryKey: ["mustahik-active-full"],
     queryFn: async () => {
@@ -238,6 +320,99 @@ export default function Distribution() {
         return { amil: [], beneficiaries: [], amilTotal: 0, beneficiaryTotal: 0 };
     }
   };
+
+  const distributeLockedBatchMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedPeriod?.id) throw new Error("Periode belum dipilih");
+      if (!selectedBatch) throw new Error("Pilih batch yang ingin disalurkan");
+      if (selectedBatch.status !== "locked") throw new Error("Batch ini tidak dalam status terkunci");
+      if (selectedBatchItems.length === 0) throw new Error("Batch tidak memiliki item distribusi");
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      for (const item of selectedBatchItems) {
+        const isZakat = item.fund_category.startsWith("zakat");
+        const table = isZakat ? "zakat_distributions" : "fidyah_distributions";
+        const batchNote = `Distribusi dari ${selectedBatch.batch_code || `BATCH-${selectedBatch.batch_no}`}`;
+
+        const { data: existingFromSameBatch, error: existingError } = await supabase
+          .from(table)
+          .select("id")
+          .eq("period_id", selectedPeriod.id)
+          .eq("mustahik_id", item.mustahik_id)
+          .eq("fund_category", item.fund_category)
+          .eq("notes", batchNote)
+          .limit(1);
+        if (existingError) throw existingError;
+        if (existingFromSameBatch && existingFromSameBatch.length > 0) continue;
+
+        const insertData: {
+          period_id: string;
+          mustahik_id: string;
+          fund_category: FundCategory;
+          status: DistributionStatus;
+          notes: string;
+          cash_amount?: number;
+          rice_amount_kg?: number;
+          food_amount_kg?: number;
+        } = {
+          period_id: selectedPeriod.id,
+          mustahik_id: item.mustahik_id,
+          fund_category: item.fund_category,
+          status: "distributed",
+          notes: batchNote,
+          cash_amount: Number(item.cash_amount || 0),
+        };
+
+        if (isZakat) {
+          insertData.rice_amount_kg = Number(item.rice_amount_kg || 0);
+        } else {
+          insertData.food_amount_kg = Number(item.food_amount_kg || 0);
+        }
+
+        const { data: dist, error: distError } = await supabase.from(table).insert(insertData).select().single();
+        if (distError) throw distError;
+
+        const { error: ledgerError } = await supabase.from("fund_ledger").insert({
+          period_id: selectedPeriod.id,
+          category: item.fund_category,
+          transaction_type: "distribution",
+          amount_cash: -Number(item.cash_amount || 0),
+          amount_rice_kg: -Number(item.rice_amount_kg || 0),
+          amount_food_kg: -Number(item.food_amount_kg || 0),
+          reference_id: dist.id,
+          reference_type: table,
+          description: `Distribusi ${selectedBatch.batch_code || `BATCH-${selectedBatch.batch_no}`} ke mustahik`,
+        });
+        if (ledgerError) throw ledgerError;
+      }
+
+      const { error: batchUpdateError } = await supabase
+        .from("distribution_calculation_batches")
+        .update({
+          status: "distributed",
+          distributed_at: new Date().toISOString(),
+          distributed_by: user?.id || null,
+        })
+        .eq("id", selectedBatch.id)
+        .eq("status", "locked");
+
+      if (batchUpdateError) throw batchUpdateError;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["distribution-calculation-batches"] });
+      queryClient.invalidateQueries({ queryKey: ["distribution-calculation-batch-items"] });
+      queryClient.invalidateQueries({ queryKey: ["zakat_distributions"] });
+      queryClient.invalidateQueries({ queryKey: ["fidyah_distributions"] });
+      queryClient.invalidateQueries({ queryKey: ["fund-balances"] });
+      toast({ title: "Batch berhasil disalurkan ke daftar distribusi" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Gagal menyalurkan batch", description: error.message });
+    },
+  });
 
   const openPreview = (category: FundCategory) => {
     setPreviewCategory(category);
@@ -378,6 +553,21 @@ export default function Distribution() {
     );
   };
 
+  const selectedBatchSummary = useMemo(() => {
+    if (!selectedBatch) return null;
+
+    const recipientCount = new Set(selectedBatchItems.map((item) => item.mustahik_id)).size;
+    const categoryCount = new Set(selectedBatchItems.map((item) => item.fund_category)).size;
+
+    return {
+      recipientCount,
+      categoryCount,
+      totalCash: selectedBatch.total_allocated_cash || 0,
+      totalRice: selectedBatch.total_allocated_rice_kg || 0,
+      totalFood: selectedBatch.total_allocated_food_kg || 0,
+    };
+  }, [selectedBatch, selectedBatchItems]);
+
   const renderDistributionTable = () => (
     <Table>
       <TableHeader>
@@ -483,6 +673,71 @@ export default function Distribution() {
           </TabsList>
 
           <TabsContent value="distribution" className="space-y-4 mt-4">
+            <Card className="border-primary/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Distribusi Berdasarkan Batch Lock</CardTitle>
+                <CardDescription>
+                  Pilih batch dari menu Perhitungan, lalu salurkan sekaligus agar dana batch tercatat ke distribusi.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">Batch terkunci</p>
+                    <Select value={selectedBatchId || ""} onValueChange={setSelectedBatchId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pilih batch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {lockedBatches.length === 0 ? (
+                          <SelectItem value="__none" disabled>
+                            Belum ada batch
+                          </SelectItem>
+                        ) : (
+                          lockedBatches.map((batch) => (
+                            <SelectItem key={batch.id} value={batch.id}>
+                              {batch.batch_code || `BATCH-${batch.batch_no}`} • {BATCH_STATUS_LABELS[batch.status] || batch.status}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    onClick={() => distributeLockedBatchMutation.mutate()}
+                    disabled={!selectedBatch || selectedBatch.status !== "locked" || distributeLockedBatchMutation.isPending || isReadOnly}
+                  >
+                    {distributeLockedBatchMutation.isPending ? "Menyalurkan..." : "Salurkan Batch"}
+                  </Button>
+                </div>
+
+                {selectedBatch && selectedBatchSummary && (
+                  <div className="grid gap-3 md:grid-cols-5">
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-xs text-muted-foreground">Kode Batch</p>
+                      <p className="font-semibold">{selectedBatch.batch_code || `BATCH-${selectedBatch.batch_no}`}</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-xs text-muted-foreground">Penerima</p>
+                      <p className="font-semibold">{selectedBatchSummary.recipientCount}</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-xs text-muted-foreground">Total Kas</p>
+                      <p className="font-semibold">{formatCurrency(selectedBatchSummary.totalCash)}</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-xs text-muted-foreground">Total Beras</p>
+                      <p className="font-semibold">{selectedBatchSummary.totalRice.toFixed(2)} kg</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-xs text-muted-foreground">Total Makanan</p>
+                      <p className="font-semibold">{selectedBatchSummary.totalFood.toFixed(2)} kg</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{allCategories.map(renderBalanceCard)}</div>
 
             <Card>

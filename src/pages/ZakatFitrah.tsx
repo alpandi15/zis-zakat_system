@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -30,7 +30,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Eye, Receipt } from "lucide-react";
+import { Plus, Eye, Receipt, Pencil, ShieldAlert, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { formatCurrency } from "@/lib/formatCurrency";
@@ -46,6 +46,13 @@ interface MuzakkiMember {
 
 interface Transaction {
   id: string;
+  transaction_no?: number | null;
+  created_by: string | null;
+  correction_of_transaction_id: string | null;
+  is_void: boolean;
+  locked_batch_id: string | null;
+  void_reason: string | null;
+  voided_at: string | null;
   muzakki_id: string;
   period_id: string;
   payment_type: "rice" | "money";
@@ -57,14 +64,23 @@ interface Transaction {
   transaction_date: string;
   notes: string | null;
   muzakki?: { name: string };
+  locked_batch?: { status: string; batch_code: string; batch_no: number } | null;
 }
 
 interface TransactionItem {
   id: string;
+  muzakki_member_id: string;
+  is_void: boolean;
   member: {
     name: string;
     relationship: string;
   } | null;
+}
+
+interface CreatorProfile {
+  id: string;
+  full_name: string | null;
+  email: string | null;
 }
 
 // Default values (used as fallback if period config is missing)
@@ -86,6 +102,9 @@ export default function ZakatFitrah() {
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [correctingTransaction, setCorrectingTransaction] = useState<Transaction | null>(null);
+  const [correctionReason, setCorrectionReason] = useState("");
   const [selectedMuzakkiId, setSelectedMuzakkiId] = useState("");
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [paymentType, setPaymentType] = useState<"rice" | "money">("rice");
@@ -111,6 +130,7 @@ export default function ZakatFitrah() {
   const totalRiceAmount = isOverrideTotalRice ? customTotalRiceKg : calculatedRiceTotal;
   const effectiveRicePerPerson =
     totalMembersCount > 0 ? Math.round((totalRiceAmount / totalMembersCount) * 1000) / 1000 : ricePerPerson;
+  const isTransactionLocked = (tx: Transaction) => Boolean(tx.locked_batch_id && tx.locked_batch?.status !== "cancelled");
 
   // Fetch transactions for selected period
   const { data: transactions = [], isLoading } = useQuery({
@@ -119,7 +139,7 @@ export default function ZakatFitrah() {
       if (!selectedPeriod?.id) return [];
       const { data, error } = await supabase
         .from("zakat_fitrah_transactions")
-        .select("*, muzakki:muzakki_id(name)")
+        .select("*, muzakki:muzakki_id(name), locked_batch:locked_batch_id(status, batch_code, batch_no)")
         .eq("period_id", selectedPeriod.id)
         .order("transaction_date", { ascending: false });
       if (error) throw error;
@@ -142,11 +162,39 @@ export default function ZakatFitrah() {
     },
   });
 
-  const selectedMuzakkiName = muzakkiList.find(m => m.id === selectedMuzakkiId)?.name;
+  const creatorIds = useMemo(
+    () => Array.from(new Set(transactions.map((tx) => tx.created_by).filter(Boolean) as string[])),
+    [transactions],
+  );
+
+  const { data: creatorProfiles = [] } = useQuery({
+    queryKey: ["transaction-creators-zakat-fitrah", creatorIds],
+    queryFn: async () => {
+      if (creatorIds.length === 0) return [];
+      const { data, error } = await supabase.from("profiles").select("id, full_name, email").in("id", creatorIds);
+      if (error) throw error;
+      return (data ?? []) as CreatorProfile[];
+    },
+    enabled: creatorIds.length > 0,
+  });
+
+  const creatorMap = useMemo(() => {
+    const map = new Map<string, string>();
+    creatorProfiles.forEach((profile) => {
+      const label = profile.full_name || profile.email || profile.id;
+      map.set(profile.id, label);
+    });
+    return map;
+  }, [creatorProfiles]);
+
+  const getCreatorName = (createdBy: string | null) => {
+    if (!createdBy) return "-";
+    return creatorMap.get(createdBy) || createdBy;
+  };
 
   // Fetch members for selected muzakki with paid status check
   const { data: muzakkiMembers = [], isLoading: isLoadingMembers } = useQuery({
-    queryKey: ["muzakki-members-for-zakat", selectedMuzakkiId, selectedPeriod?.id],
+    queryKey: ["muzakki-members-for-zakat", selectedMuzakkiId, selectedPeriod?.id, editingTransaction?.id || null],
     queryFn: async () => {
       if (!selectedMuzakkiId || !selectedPeriod?.id) return [];
       
@@ -166,13 +214,17 @@ export default function ZakatFitrah() {
       // Check which members already paid in this period
       const { data: paidItems, error: paidError } = await supabase
         .from("zakat_fitrah_transaction_items")
-        .select("muzakki_member_id")
+        .select("muzakki_member_id, transaction_id")
         .eq("period_id", selectedPeriod.id)
+        .eq("is_void", false)
         .in("muzakki_member_id", members.map(m => m.id));
 
       if (paidError) throw paidError;
 
-      const paidMemberIds = new Set(paidItems.map(item => item.muzakki_member_id));
+      const paidRows = paidItems ?? [];
+      const filteredPaidItems =
+        editingTransaction?.id ? paidRows.filter((item) => item.transaction_id !== editingTransaction.id) : paidRows;
+      const paidMemberIds = new Set(filteredPaidItems.map(item => item.muzakki_member_id));
 
       return members.map(m => ({
         ...m,
@@ -190,7 +242,8 @@ export default function ZakatFitrah() {
       const { data, error } = await supabase
         .from("zakat_fitrah_transaction_items")
         .select("*, member:muzakki_member_id(name, relationship)")
-        .eq("transaction_id", viewingTransaction.id);
+        .eq("transaction_id", viewingTransaction.id)
+        .eq("is_void", false);
       if (error) throw error;
       return data as TransactionItem[];
     },
@@ -203,6 +256,9 @@ export default function ZakatFitrah() {
       if (!selectedPeriod?.id || selectedMembers.length === 0) {
         throw new Error("Pilih minimal satu anggota");
       }
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
       const totalMembers = selectedMembers.length;
       const calculatedRiceAmount = totalMembers * ricePerPerson;
@@ -214,12 +270,91 @@ export default function ZakatFitrah() {
           : null;
       const moneyAmount = paymentType === "money" ? totalMembers * cashPerPerson : null;
 
-      // Create main transaction
+      const items = selectedMembers.map(memberId => ({
+        transaction_id: "",
+        muzakki_member_id: memberId,
+        period_id: selectedPeriod.id,
+        rice_amount_kg: perMemberRiceAmount,
+        money_amount: paymentType === "money" ? cashPerPerson : null,
+      }));
+      const category = paymentType === "rice" ? "zakat_fitrah_rice" : "zakat_fitrah_cash";
+
+      if (editingTransaction) {
+        if (isTransactionLocked(editingTransaction)) {
+          throw new Error("Transaksi sudah batch lock dan tidak bisa diedit.");
+        }
+
+        const { error: txError } = await supabase
+          .from("zakat_fitrah_transactions")
+          .update({
+            muzakki_id: selectedMuzakkiId,
+            payment_type: paymentType,
+            is_custom_total_rice: paymentType === "rice" ? isOverrideTotalRice : false,
+            rice_amount_kg: riceAmount,
+            money_amount: moneyAmount,
+            rice_price_per_kg: paymentType === "money" ? (cashPerPerson / ricePerPerson) : null,
+            total_members: totalMembers,
+            notes: notes || null,
+          })
+          .eq("id", editingTransaction.id);
+        if (txError) throw txError;
+
+        const { error: deleteItemsError } = await supabase
+          .from("zakat_fitrah_transaction_items")
+          .delete()
+          .eq("transaction_id", editingTransaction.id);
+        if (deleteItemsError) throw deleteItemsError;
+
+        const nextItems = items.map((item) => ({ ...item, transaction_id: editingTransaction.id }));
+        const { error: insertItemsError } = await supabase.from("zakat_fitrah_transaction_items").insert(nextItems);
+        if (insertItemsError) throw insertItemsError;
+
+        const { data: existingLedger, error: ledgerLookupError } = await supabase
+          .from("fund_ledger")
+          .select("id")
+          .eq("reference_id", editingTransaction.id)
+          .eq("reference_type", "zakat_fitrah_transactions")
+          .eq("transaction_type", "collection")
+          .order("created_at", { ascending: true })
+          .limit(1);
+        if (ledgerLookupError) throw ledgerLookupError;
+
+        if (existingLedger && existingLedger.length > 0) {
+          const { error: ledgerUpdateError } = await supabase
+            .from("fund_ledger")
+            .update({
+              category,
+              amount_cash: moneyAmount || 0,
+              amount_rice_kg: riceAmount || 0,
+              description: `Zakat Fitrah dari ${muzakkiList.find(m => m.id === selectedMuzakkiId)?.name} (${totalMembers} orang)`,
+            })
+            .eq("id", existingLedger[0].id);
+          if (ledgerUpdateError) throw ledgerUpdateError;
+        } else {
+          const { error: ledgerInsertError } = await supabase
+            .from("fund_ledger")
+            .insert({
+              period_id: selectedPeriod.id,
+              category,
+              transaction_type: "collection",
+              amount_cash: moneyAmount || 0,
+              amount_rice_kg: riceAmount || 0,
+              reference_id: editingTransaction.id,
+              reference_type: "zakat_fitrah_transactions",
+              description: `Zakat Fitrah dari ${muzakkiList.find(m => m.id === selectedMuzakkiId)?.name} (${totalMembers} orang)`,
+            });
+          if (ledgerInsertError) throw ledgerInsertError;
+        }
+
+        return editingTransaction;
+      }
+
       const { data: transaction, error: txError } = await supabase
         .from("zakat_fitrah_transactions")
         .insert({
           muzakki_id: selectedMuzakkiId,
           period_id: selectedPeriod.id,
+          created_by: user?.id || null,
           payment_type: paymentType,
           is_custom_total_rice: paymentType === "rice" ? isOverrideTotalRice : false,
           rice_amount_kg: riceAmount,
@@ -230,26 +365,12 @@ export default function ZakatFitrah() {
         })
         .select()
         .single();
-
       if (txError) throw txError;
 
-      // Create transaction items for each member
-      const items = selectedMembers.map(memberId => ({
-        transaction_id: transaction.id,
-        muzakki_member_id: memberId,
-        period_id: selectedPeriod.id,
-        rice_amount_kg: perMemberRiceAmount,
-        money_amount: paymentType === "money" ? cashPerPerson : null,
-      }));
-
-      const { error: itemsError } = await supabase
-        .from("zakat_fitrah_transaction_items")
-        .insert(items);
-
+      const insertItems = items.map((item) => ({ ...item, transaction_id: transaction.id }));
+      const { error: itemsError } = await supabase.from("zakat_fitrah_transaction_items").insert(insertItems);
       if (itemsError) throw itemsError;
 
-      // Create ledger entry
-      const category = paymentType === "rice" ? "zakat_fitrah_rice" : "zakat_fitrah_cash";
       const { error: ledgerError } = await supabase
         .from("fund_ledger")
         .insert({
@@ -262,10 +383,9 @@ export default function ZakatFitrah() {
           reference_type: "zakat_fitrah_transactions",
           description: `Zakat Fitrah dari ${muzakkiList.find(m => m.id === selectedMuzakkiId)?.name} (${totalMembers} orang)`,
         });
-
       if (ledgerError) throw ledgerError;
 
-      return transaction;
+      return transaction as Transaction;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["zakat-fitrah-transactions"] });
@@ -273,7 +393,7 @@ export default function ZakatFitrah() {
       queryClient.invalidateQueries({ queryKey: ["fund-balances"] });
       resetForm();
       setIsFormOpen(false);
-      toast({ title: "Transaksi zakat fitrah berhasil disimpan" });
+      toast({ title: editingTransaction ? "Transaksi zakat fitrah berhasil diperbarui" : "Transaksi zakat fitrah berhasil disimpan" });
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Gagal", description: error.message });
@@ -281,6 +401,7 @@ export default function ZakatFitrah() {
   });
 
   const resetForm = () => {
+    setEditingTransaction(null);
     setSelectedMuzakkiId("");
     setSelectedMembers([]);
     setPaymentType("rice");
@@ -291,6 +412,171 @@ export default function ZakatFitrah() {
     setCustomRicePerPerson(periodRicePerPerson);
     setCustomCashPerPerson(periodCashPerPerson);
     setCustomTotalRiceKg(0);
+  };
+
+  const correctionMutation = useMutation({
+    mutationFn: async ({ tx, reason }: { tx: Transaction; reason: string }) => {
+      if (!reason.trim()) throw new Error("Alasan koreksi wajib diisi");
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      const nowIso = new Date().toISOString();
+      const { error: voidTxError } = await supabase
+        .from("zakat_fitrah_transactions")
+        .update({
+          is_void: true,
+          void_reason: reason.trim(),
+          voided_at: nowIso,
+          voided_by: user?.id || null,
+        })
+        .eq("id", tx.id)
+        .eq("is_void", false);
+      if (voidTxError) throw voidTxError;
+
+      const { error: voidItemsError } = await supabase
+        .from("zakat_fitrah_transaction_items")
+        .update({
+          is_void: true,
+          voided_at: nowIso,
+        })
+        .eq("transaction_id", tx.id)
+        .eq("is_void", false);
+      if (voidItemsError) throw voidItemsError;
+
+      const amountCash = tx.payment_type === "money" ? -(tx.money_amount || 0) : 0;
+      const amountRice = tx.payment_type === "rice" ? -(tx.rice_amount_kg || 0) : 0;
+      if (amountCash === 0 && amountRice === 0) return;
+
+      const { error: adjustmentError } = await supabase.from("fund_ledger").insert({
+        period_id: tx.period_id,
+        category: tx.payment_type === "rice" ? "zakat_fitrah_rice" : "zakat_fitrah_cash",
+        transaction_type: "adjustment",
+        amount_cash: amountCash,
+        amount_rice_kg: amountRice,
+        reference_id: tx.id,
+        reference_type: "zakat_fitrah_transactions",
+        description: `Koreksi void ZF-${String(tx.transaction_no || 0).padStart(4, "0")}: ${reason.trim()}`,
+      });
+      if (adjustmentError) throw adjustmentError;
+    },
+    onSuccess: () => {
+      setCorrectingTransaction(null);
+      setCorrectionReason("");
+      queryClient.invalidateQueries({ queryKey: ["zakat-fitrah-transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members-for-zakat"] });
+      queryClient.invalidateQueries({ queryKey: ["fund-balances"] });
+      toast({ title: "Transaksi di-void. Silakan input transaksi pengganti yang benar." });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Gagal koreksi transaksi", description: error.message });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (tx: Transaction) => {
+      if (isTransactionLocked(tx)) {
+        throw new Error("Transaksi sudah batch lock dan tidak bisa dihapus.");
+      }
+
+      const amountCash = tx.payment_type === "money" ? -(tx.money_amount || 0) : 0;
+      const amountRice = tx.payment_type === "rice" ? -(tx.rice_amount_kg || 0) : 0;
+      if (amountCash !== 0 || amountRice !== 0) {
+        const { error: adjustmentError } = await supabase.from("fund_ledger").insert({
+          period_id: tx.period_id,
+          category: tx.payment_type === "rice" ? "zakat_fitrah_rice" : "zakat_fitrah_cash",
+          transaction_type: "adjustment",
+          amount_cash: amountCash,
+          amount_rice_kg: amountRice,
+          reference_id: tx.id,
+          reference_type: "zakat_fitrah_transactions",
+          description: `Pembatalan hapus ZF-${String(tx.transaction_no || 0).padStart(4, "0")}`,
+        });
+        if (adjustmentError) throw adjustmentError;
+      }
+
+      const { error } = await supabase.from("zakat_fitrah_transactions").delete().eq("id", tx.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["zakat-fitrah-transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members-for-zakat"] });
+      queryClient.invalidateQueries({ queryKey: ["fund-balances"] });
+      toast({ title: "Transaksi zakat fitrah berhasil dihapus" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Gagal hapus transaksi", description: error.message });
+    },
+  });
+
+  const handleDelete = (tx: Transaction) => {
+    if (isTransactionLocked(tx)) {
+      toast({ variant: "destructive", title: "Transaksi sudah batch lock dan tidak bisa dihapus." });
+      return;
+    }
+
+    const label = tx.transaction_no ? `ZF-${String(tx.transaction_no).padStart(4, "0")}` : tx.id;
+    if (!window.confirm(`Hapus transaksi ${label}? Tindakan ini tidak dapat dibatalkan.`)) {
+      return;
+    }
+
+    deleteMutation.mutate(tx);
+  };
+
+  const handleOpenEdit = async (tx: Transaction) => {
+    if (isTransactionLocked(tx)) {
+      toast({ variant: "destructive", title: "Transaksi sudah batch lock, gunakan Koreksi." });
+      return;
+    }
+
+    setEditingTransaction(tx);
+    setSelectedMuzakkiId(tx.muzakki_id);
+    setPaymentType(tx.payment_type);
+    setNotes(tx.notes || "");
+
+    const memberCount = tx.total_members || 1;
+    if (tx.payment_type === "rice") {
+      const ricePerMemberValue = (tx.rice_amount_kg || 0) / memberCount;
+      if (Math.abs(ricePerMemberValue - periodRicePerPerson) > 0.0001) {
+        setIsOverrideRice(true);
+        setCustomRicePerPerson(ricePerMemberValue);
+      } else {
+        setIsOverrideRice(false);
+        setCustomRicePerPerson(periodRicePerPerson);
+      }
+
+      setIsOverrideTotalRice(Boolean(tx.is_custom_total_rice));
+      setCustomTotalRiceKg(tx.rice_amount_kg || 0);
+      setIsOverrideCash(false);
+      setCustomCashPerPerson(periodCashPerPerson);
+    } else {
+      const cashPerMemberValue = (tx.money_amount || 0) / memberCount;
+      if (Math.abs(cashPerMemberValue - periodCashPerPerson) > 0.0001) {
+        setIsOverrideCash(true);
+        setCustomCashPerPerson(cashPerMemberValue);
+      } else {
+        setIsOverrideCash(false);
+        setCustomCashPerPerson(periodCashPerPerson);
+      }
+
+      setIsOverrideRice(false);
+      setCustomRicePerPerson(periodRicePerPerson);
+      setIsOverrideTotalRice(false);
+      setCustomTotalRiceKg(0);
+    }
+
+    const { data: items, error } = await supabase
+      .from("zakat_fitrah_transaction_items")
+      .select("muzakki_member_id")
+      .eq("transaction_id", tx.id)
+      .eq("is_void", false);
+    if (error) {
+      toast({ variant: "destructive", title: "Gagal memuat anggota transaksi", description: error.message });
+      return;
+    }
+
+    setSelectedMembers((items || []).map((item) => item.muzakki_member_id));
+    setIsFormOpen(true);
   };
 
   const toggleMember = (memberId: string, alreadyPaid: boolean) => {
@@ -333,7 +619,13 @@ export default function ZakatFitrah() {
             Transaksi Zakat Fitrah - {selectedPeriod?.name || "Pilih Periode"}
           </h2>
           {!isReadOnly && selectedPeriod && (
-            <Button onClick={() => setIsFormOpen(true)} className="gap-2">
+            <Button
+              onClick={() => {
+                resetForm();
+                setIsFormOpen(true);
+              }}
+              className="gap-2"
+            >
               <Plus className="h-4 w-4" />
               Tambah Transaksi
             </Button>
@@ -352,17 +644,23 @@ export default function ZakatFitrah() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>No. Transaksi</TableHead>
                     <TableHead>Tanggal</TableHead>
                     <TableHead>Muzakki</TableHead>
                     <TableHead>Jenis</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead>Jumlah Anggota</TableHead>
                     <TableHead className="text-right">Total</TableHead>
+                    <TableHead>Input Oleh</TableHead>
                     <TableHead className="text-right">Aksi</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {transactions.map(tx => (
                     <TableRow key={tx.id}>
+                      <TableCell className="font-mono text-xs">
+                        {tx.transaction_no ? `ZF-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
+                      </TableCell>
                       <TableCell>
                         {format(new Date(tx.transaction_date), "dd MMM yyyy", { locale: idLocale })}
                       </TableCell>
@@ -377,20 +675,61 @@ export default function ZakatFitrah() {
                           )}
                         </div>
                       </TableCell>
+                      <TableCell>
+                        {tx.is_void ? (
+                          <Badge variant="destructive">Void</Badge>
+                        ) : isTransactionLocked(tx) ? (
+                          <Badge variant="secondary">
+                            Lock {tx.locked_batch?.batch_code || `#${tx.locked_batch?.batch_no || "-"}`}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">Editable</Badge>
+                        )}
+                      </TableCell>
                       <TableCell>{tx.total_members} orang</TableCell>
                       <TableCell className="text-right">
                         {tx.payment_type === "rice"
                           ? `${tx.rice_amount_kg} kg`
                           : formatCurrency(tx.money_amount || 0)}
                       </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{getCreatorName(tx.created_by)}</TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setViewingTransaction(tx)}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setViewingTransaction(tx)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          {!isReadOnly && !tx.is_void && !isTransactionLocked(tx) && (
+                            <Button variant="ghost" size="icon" onClick={() => void handleOpenEdit(tx)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {!isReadOnly && !tx.is_void && isTransactionLocked(tx) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setCorrectingTransaction(tx);
+                                setCorrectionReason("");
+                              }}
+                            >
+                              <ShieldAlert className="h-4 w-4 text-amber-600" />
+                            </Button>
+                          )}
+                          {!isReadOnly && !isTransactionLocked(tx) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDelete(tx)}
+                              disabled={deleteMutation.isPending}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -402,10 +741,16 @@ export default function ZakatFitrah() {
       </div>
 
       {/* Create Transaction Dialog */}
-      <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+      <Dialog
+        open={isFormOpen}
+        onOpenChange={(open) => {
+          setIsFormOpen(open);
+          if (!open) resetForm();
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Tambah Transaksi Zakat Fitrah</DialogTitle>
+            <DialogTitle>{editingTransaction ? "Edit Transaksi Zakat Fitrah" : "Tambah Transaksi Zakat Fitrah"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -628,10 +973,56 @@ export default function ZakatFitrah() {
                 Batal
               </Button>
               <Button type="submit" disabled={createMutation.isPending || selectedMembers.length === 0}>
-                Simpan Transaksi
+                {editingTransaction ? "Simpan Perubahan" : "Simpan Transaksi"}
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Correction Dialog */}
+      <Dialog open={!!correctingTransaction} onOpenChange={(open) => !open && setCorrectingTransaction(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Koreksi Transaksi Zakat Fitrah</DialogTitle>
+          </DialogHeader>
+          {correctingTransaction && (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                <p className="font-medium">
+                  {correctingTransaction.transaction_no
+                    ? `ZF-${String(correctingTransaction.transaction_no).padStart(4, "0")}`
+                    : correctingTransaction.id}
+                </p>
+                <p className="text-muted-foreground">{correctingTransaction.muzakki?.name || "-"}</p>
+                <p className="text-muted-foreground">
+                  {correctingTransaction.payment_type === "rice"
+                    ? `${correctingTransaction.rice_amount_kg || 0} kg`
+                    : formatCurrency(correctingTransaction.money_amount || 0)}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="zakatFitrahCorrectionReason">Alasan Koreksi (wajib)</Label>
+                <Textarea
+                  id="zakatFitrahCorrectionReason"
+                  value={correctionReason}
+                  onChange={(e) => setCorrectionReason(e.target.value)}
+                  placeholder="Contoh: salah pilih anggota / jumlah beras"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setCorrectingTransaction(null)}>
+                  Batal
+                </Button>
+                <Button
+                  onClick={() => correctionMutation.mutate({ tx: correctingTransaction, reason: correctionReason })}
+                  disabled={correctionMutation.isPending || !correctionReason.trim()}
+                >
+                  Void & Koreksi
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -656,6 +1047,10 @@ export default function ZakatFitrah() {
                   <p className="font-medium">
                     {format(new Date(viewingTransaction.transaction_date), "dd MMMM yyyy", { locale: idLocale })}
                   </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Input Oleh</p>
+                  <p className="font-medium">{getCreatorName(viewingTransaction.created_by)}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Jenis Pembayaran</p>

@@ -13,6 +13,16 @@ interface CreateUserRequest {
   role: string;
 }
 
+const SUPER_ADMIN_EQUIVALENT_ROLES = new Set(["super_admin", "chairman", "secretary", "treasurer"]);
+const ALLOWED_ASSIGNABLE_ROLES = new Set([
+  "chairman",
+  "secretary",
+  "treasurer",
+  "zakat_officer",
+  "fidyah_officer",
+  "viewer",
+]);
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -27,7 +37,7 @@ serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // Verify the requesting user is a super_admin
+    // Verify requesting user has super-admin-equivalent privileges
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "No authorization header" }), {
@@ -49,15 +59,15 @@ serve(async (req: Request) => {
       });
     }
 
-    // Check if requesting user is super_admin
+    // Check if requesting user has super-admin-equivalent role
     const { data: roles } = await supabaseAdmin
       .from("user_roles")
       .select("role")
       .eq("user_id", requestingUser.id);
 
-    const isSuperAdmin = roles?.some((r) => r.role === "super_admin");
-    if (!isSuperAdmin) {
-      return new Response(JSON.stringify({ error: "Only super_admin can create users" }), {
+    const canManageUsers = roles?.some((r) => SUPER_ADMIN_EQUIVALENT_ROLES.has(r.role));
+    if (!canManageUsers) {
+      return new Response(JSON.stringify({ error: "Only executive roles can create users" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -67,6 +77,13 @@ serve(async (req: Request) => {
 
     if (!email || !password || !full_name || !role) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!ALLOWED_ASSIGNABLE_ROLES.has(role)) {
+      return new Response(JSON.stringify({ error: "Invalid role" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

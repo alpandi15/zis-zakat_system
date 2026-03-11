@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { 
   Shield, 
+  ClipboardList,
   LogOut, 
   User, 
   Crown, 
@@ -20,6 +21,7 @@ import {
 const roleIcons: Record<string, React.ReactNode> = {
   super_admin: <Crown className="h-4 w-4" />,
   chairman: <Shield className="h-4 w-4" />,
+  secretary: <ClipboardList className="h-4 w-4" />,
   treasurer: <Wallet className="h-4 w-4" />,
   zakat_officer: <HandCoins className="h-4 w-4" />,
   fidyah_officer: <BookOpen className="h-4 w-4" />,
@@ -28,10 +30,11 @@ const roleIcons: Record<string, React.ReactNode> = {
 
 const roleLabels: Record<string, string> = {
   super_admin: 'Super Admin',
-  chairman: 'Chairman',
-  treasurer: 'Treasurer',
-  zakat_officer: 'Zakat Officer',
-  fidyah_officer: 'Fidyah Officer',
+  chairman: 'Ketua',
+  secretary: 'Sekretaris',
+  treasurer: 'Bendahara',
+  zakat_officer: 'Petugas Zakat',
+  fidyah_officer: 'Petugas Fidyah',
   viewer: 'Viewer',
 };
 
@@ -187,8 +190,9 @@ export default function Index() {
                     </div>
                     <p className="text-sm text-muted-foreground">
                       {key === 'super_admin' && 'Full system access and user management'}
-                      {key === 'chairman' && 'Organizational oversight and approvals'}
-                      {key === 'treasurer' && 'Financial management and reporting'}
+                      {key === 'chairman' && 'Full system access and organizational leadership'}
+                      {key === 'secretary' && 'Full system access and administrative management'}
+                      {key === 'treasurer' && 'Full system access and financial management'}
                       {key === 'zakat_officer' && 'Zakat collection and distribution'}
                       {key === 'fidyah_officer' && 'Fidyah management and records'}
                       {key === 'viewer' && 'Read-only access to data'}

@@ -14,6 +14,7 @@
 CREATE TYPE public.app_role AS ENUM (
   'super_admin',
   'chairman',
+  'secretary',
   'treasurer',
   'zakat_officer',
   'fidyah_officer',
@@ -257,6 +258,7 @@ INSERT INTO public.asnaf_settings (asnaf_code, asnaf_name, receives_zakat_fitrah
 CREATE TABLE public.zakat_fitrah_transactions (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   period_id UUID NOT NULL REFERENCES public.periods(id) ON DELETE RESTRICT,
+  transaction_no INTEGER NOT NULL DEFAULT 0 CHECK (transaction_no > 0),
   muzakki_id UUID NOT NULL REFERENCES public.muzakki(id) ON DELETE RESTRICT,
   transaction_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   payment_type public.zakat_payment_type NOT NULL DEFAULT 'rice',
@@ -268,7 +270,8 @@ CREATE TABLE public.zakat_fitrah_transactions (
   notes TEXT,
   created_by UUID REFERENCES auth.users(id),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  UNIQUE (period_id, transaction_no)
 );
 
 -- Zakat Fitrah transaction items (per member)
@@ -287,6 +290,7 @@ CREATE TABLE public.zakat_fitrah_transaction_items (
 CREATE TABLE public.zakat_mal_transactions (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   period_id UUID NOT NULL REFERENCES public.periods(id) ON DELETE RESTRICT,
+  transaction_no INTEGER NOT NULL DEFAULT 0 CHECK (transaction_no > 0),
   muzakki_id UUID NOT NULL REFERENCES public.muzakki(id) ON DELETE RESTRICT,
   muzakki_member_id UUID REFERENCES public.muzakki_members(id) ON DELETE SET NULL,
   transaction_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
@@ -313,13 +317,15 @@ CREATE TABLE public.zakat_mal_transactions (
   notes TEXT,
   created_by UUID REFERENCES auth.users(id),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  UNIQUE (period_id, transaction_no)
 );
 
 -- Fidyah transactions
 CREATE TABLE public.fidyah_transactions (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   period_id UUID NOT NULL REFERENCES public.periods(id) ON DELETE RESTRICT,
+  transaction_no INTEGER NOT NULL DEFAULT 0 CHECK (transaction_no > 0),
   payer_muzakki_id UUID REFERENCES public.muzakki(id),
   payer_member_id UUID REFERENCES public.muzakki_members(id) ON DELETE SET NULL,
   payer_name TEXT NOT NULL,
@@ -341,7 +347,8 @@ CREATE TABLE public.fidyah_transactions (
   notes TEXT,
   created_by UUID REFERENCES auth.users(id),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  UNIQUE (period_id, transaction_no)
 );
 
 -- =====================================================
@@ -427,6 +434,50 @@ CREATE TABLE public.distribution_assignments (
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
+-- Distribution calculation batches (snapshot/lock while collection is still running)
+CREATE TABLE public.distribution_calculation_batches (
+  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  period_id UUID NOT NULL REFERENCES public.periods(id) ON DELETE RESTRICT,
+  batch_no INTEGER NOT NULL DEFAULT 0 CHECK (batch_no > 0),
+  batch_code TEXT NOT NULL DEFAULT '',
+  amil_distribution_mode TEXT NOT NULL DEFAULT 'percentage',
+  amil_share_factor NUMERIC NOT NULL DEFAULT 0.5 CHECK (amil_share_factor >= 0 AND amil_share_factor <= 1),
+  status TEXT NOT NULL DEFAULT 'locked' CHECK (status IN ('locked', 'distributed', 'cancelled')),
+  notes TEXT,
+  total_allocated_cash NUMERIC NOT NULL DEFAULT 0,
+  total_allocated_rice_kg NUMERIC NOT NULL DEFAULT 0,
+  total_allocated_food_kg NUMERIC NOT NULL DEFAULT 0,
+  locked_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  locked_by UUID REFERENCES auth.users(id),
+  distributed_at TIMESTAMP WITH TIME ZONE,
+  distributed_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  CONSTRAINT distribution_calculation_batches_mode_check
+    CHECK (amil_distribution_mode IN ('percentage', 'proportional_with_factor')),
+  UNIQUE (period_id, batch_no),
+  UNIQUE (period_id, batch_code)
+);
+
+-- Distribution calculation batch items (per mustahik per fund category)
+CREATE TABLE public.distribution_calculation_batch_items (
+  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  batch_id UUID NOT NULL REFERENCES public.distribution_calculation_batches(id) ON DELETE CASCADE,
+  period_id UUID NOT NULL REFERENCES public.periods(id) ON DELETE RESTRICT,
+  mustahik_id UUID NOT NULL REFERENCES public.mustahik(id) ON DELETE RESTRICT,
+  fund_category public.fund_category NOT NULL,
+  is_amil BOOLEAN NOT NULL DEFAULT false,
+  asnaf_code TEXT,
+  priority public.priority_level,
+  cash_amount NUMERIC NOT NULL DEFAULT 0,
+  rice_amount_kg NUMERIC NOT NULL DEFAULT 0,
+  food_amount_kg NUMERIC NOT NULL DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  CONSTRAINT distribution_calculation_batch_items_amount_non_negative_check
+    CHECK (cash_amount >= 0 AND rice_amount_kg >= 0 AND food_amount_kg >= 0),
+  UNIQUE (batch_id, mustahik_id, fund_category)
+);
+
 -- =====================================================
 -- SECTION 6: INDEXES
 -- =====================================================
@@ -496,6 +547,13 @@ CREATE INDEX idx_distribution_assignments_period_id ON public.distribution_assig
 CREATE INDEX idx_distribution_assignments_assigned_to ON public.distribution_assignments(assigned_to);
 CREATE INDEX idx_distribution_assignments_status ON public.distribution_assignments(status);
 
+-- Distribution calculation batch indexes
+CREATE INDEX idx_distribution_calculation_batches_period_id ON public.distribution_calculation_batches(period_id);
+CREATE INDEX idx_distribution_calculation_batches_status ON public.distribution_calculation_batches(status);
+CREATE INDEX idx_distribution_calculation_batch_items_batch_id ON public.distribution_calculation_batch_items(batch_id);
+CREATE INDEX idx_distribution_calculation_batch_items_period_id ON public.distribution_calculation_batch_items(period_id);
+CREATE INDEX idx_distribution_calculation_batch_items_mustahik_id ON public.distribution_calculation_batch_items(mustahik_id);
+
 -- =====================================================
 -- SECTION 7: SECURITY DEFINER FUNCTIONS
 -- (With internal authorization checks for security)
@@ -513,7 +571,13 @@ AS $$
     SELECT 1
     FROM public.user_roles
     WHERE user_id = _user_id
-      AND role = _role
+      AND (
+        role = _role
+        OR (
+          _role = 'super_admin'::public.app_role
+          AND role::text IN ('chairman', 'secretary', 'treasurer')
+        )
+      )
   )
 $$;
 
@@ -529,11 +593,17 @@ AS $$
     SELECT 1
     FROM public.user_roles
     WHERE user_id = _user_id
-      AND role = ANY(_roles)
+      AND (
+        role = ANY(_roles)
+        OR (
+          'super_admin'::public.app_role = ANY(_roles)
+          AND role::text IN ('chairman', 'secretary', 'treasurer')
+        )
+      )
   )
 $$;
 
--- Check if user is admin (super_admin or chairman)
+-- Check if user is admin (super-admin-equivalent roles)
 CREATE OR REPLACE FUNCTION public.is_admin(_user_id UUID)
 RETURNS BOOLEAN
 LANGUAGE sql
@@ -541,7 +611,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
-  SELECT public.has_any_role(_user_id, ARRAY['super_admin', 'chairman']::public.app_role[])
+  SELECT public.has_role(_user_id, 'super_admin'::public.app_role)
 $$;
 
 -- Get all roles for a user
@@ -753,6 +823,90 @@ BEGIN
 END;
 $$;
 
+-- Auto assign transaction number per period for Zakat Fitrah
+CREATE OR REPLACE FUNCTION public.set_zakat_fitrah_transaction_no()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.transaction_no IS NULL OR NEW.transaction_no <= 0 THEN
+    PERFORM pg_advisory_xact_lock(61001, hashtext(NEW.period_id::text));
+
+    SELECT COALESCE(MAX(t.transaction_no), 0) + 1
+    INTO NEW.transaction_no
+    FROM public.zakat_fitrah_transactions t
+    WHERE t.period_id = NEW.period_id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+-- Auto assign transaction number per period for Fidyah
+CREATE OR REPLACE FUNCTION public.set_fidyah_transaction_no()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.transaction_no IS NULL OR NEW.transaction_no <= 0 THEN
+    PERFORM pg_advisory_xact_lock(61002, hashtext(NEW.period_id::text));
+
+    SELECT COALESCE(MAX(t.transaction_no), 0) + 1
+    INTO NEW.transaction_no
+    FROM public.fidyah_transactions t
+    WHERE t.period_id = NEW.period_id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+-- Auto assign transaction number per period for Zakat Mal
+CREATE OR REPLACE FUNCTION public.set_zakat_mal_transaction_no()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.transaction_no IS NULL OR NEW.transaction_no <= 0 THEN
+    PERFORM pg_advisory_xact_lock(61003, hashtext(NEW.period_id::text));
+
+    SELECT COALESCE(MAX(t.transaction_no), 0) + 1
+    INTO NEW.transaction_no
+    FROM public.zakat_mal_transactions t
+    WHERE t.period_id = NEW.period_id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+-- Auto assign batch number/code for distribution calculation batch lock
+CREATE OR REPLACE FUNCTION public.set_distribution_calculation_batch_meta()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.batch_no IS NULL OR NEW.batch_no <= 0 THEN
+    PERFORM pg_advisory_xact_lock(62001, hashtext(NEW.period_id::text));
+
+    SELECT COALESCE(MAX(b.batch_no), 0) + 1
+    INTO NEW.batch_no
+    FROM public.distribution_calculation_batches b
+    WHERE b.period_id = NEW.period_id;
+  END IF;
+
+  IF NEW.batch_code IS NULL OR btrim(NEW.batch_code) = '' THEN
+    NEW.batch_code := 'BATCH-' || LPAD(NEW.batch_no::text, 3, '0');
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
 -- =====================================================
 -- SECTION 9: TRIGGERS
 -- =====================================================
@@ -794,6 +948,18 @@ CREATE TRIGGER update_fidyah_transactions_updated_at
   BEFORE UPDATE ON public.fidyah_transactions
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
+CREATE TRIGGER set_zakat_fitrah_transaction_no_before_insert
+  BEFORE INSERT ON public.zakat_fitrah_transactions
+  FOR EACH ROW EXECUTE FUNCTION public.set_zakat_fitrah_transaction_no();
+
+CREATE TRIGGER set_zakat_mal_transaction_no_before_insert
+  BEFORE INSERT ON public.zakat_mal_transactions
+  FOR EACH ROW EXECUTE FUNCTION public.set_zakat_mal_transaction_no();
+
+CREATE TRIGGER set_fidyah_transaction_no_before_insert
+  BEFORE INSERT ON public.fidyah_transactions
+  FOR EACH ROW EXECUTE FUNCTION public.set_fidyah_transaction_no();
+
 CREATE TRIGGER update_fund_ledger_updated_at
   BEFORE UPDATE ON public.fund_ledger
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
@@ -808,6 +974,14 @@ CREATE TRIGGER update_fidyah_distributions_updated_at
 
 CREATE TRIGGER update_distribution_assignments_updated_at
   BEFORE UPDATE ON public.distribution_assignments
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+CREATE TRIGGER set_distribution_calculation_batch_meta_before_insert
+  BEFORE INSERT ON public.distribution_calculation_batches
+  FOR EACH ROW EXECUTE FUNCTION public.set_distribution_calculation_batch_meta();
+
+CREATE TRIGGER update_distribution_calculation_batches_updated_at
+  BEFORE UPDATE ON public.distribution_calculation_batches
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 CREATE TRIGGER update_asnaf_settings_updated_at
@@ -842,6 +1016,8 @@ ALTER TABLE public.fund_ledger ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zakat_distributions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.fidyah_distributions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.distribution_assignments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.distribution_calculation_batches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.distribution_calculation_batch_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.asnaf_settings ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================
@@ -1191,7 +1367,73 @@ CREATE POLICY "Admins can delete assignments"
   USING (public.is_admin(auth.uid()));
 
 -- =====================================================
--- SECTION 25: RLS POLICIES - ASNAF SETTINGS
+-- SECTION 25: RLS POLICIES - DISTRIBUTION CALCULATION BATCHES
+-- =====================================================
+
+CREATE POLICY "Authorized roles can view distribution calculation batches"
+  ON public.distribution_calculation_batches FOR SELECT
+  USING (public.has_any_role(auth.uid(), ARRAY['super_admin', 'chairman', 'treasurer', 'zakat_officer', 'fidyah_officer']::public.app_role[]));
+
+CREATE POLICY "Admins and Zakat Officers can create distribution calculation batches"
+  ON public.distribution_calculation_batches FOR INSERT
+  WITH CHECK (
+    public.has_any_role(auth.uid(), ARRAY['super_admin', 'zakat_officer']::public.app_role[])
+    AND public.is_period_active(period_id)
+  );
+
+CREATE POLICY "Admins and Zakat Officers can update distribution calculation batches"
+  ON public.distribution_calculation_batches FOR UPDATE
+  USING (
+    public.has_any_role(auth.uid(), ARRAY['super_admin', 'zakat_officer']::public.app_role[])
+    AND public.is_period_active(period_id)
+  )
+  WITH CHECK (
+    public.has_any_role(auth.uid(), ARRAY['super_admin', 'zakat_officer']::public.app_role[])
+    AND public.is_period_active(period_id)
+  );
+
+CREATE POLICY "Admins can delete distribution calculation batches"
+  ON public.distribution_calculation_batches FOR DELETE
+  USING (
+    public.has_role(auth.uid(), 'super_admin')
+    AND public.is_period_active(period_id)
+  );
+
+-- =====================================================
+-- SECTION 26: RLS POLICIES - DISTRIBUTION CALCULATION BATCH ITEMS
+-- =====================================================
+
+CREATE POLICY "Authorized roles can view distribution calculation batch items"
+  ON public.distribution_calculation_batch_items FOR SELECT
+  USING (public.has_any_role(auth.uid(), ARRAY['super_admin', 'chairman', 'treasurer', 'zakat_officer', 'fidyah_officer']::public.app_role[]));
+
+CREATE POLICY "Admins and Zakat Officers can create distribution calculation batch items"
+  ON public.distribution_calculation_batch_items FOR INSERT
+  WITH CHECK (
+    public.has_any_role(auth.uid(), ARRAY['super_admin', 'zakat_officer']::public.app_role[])
+    AND public.is_period_active(period_id)
+  );
+
+CREATE POLICY "Admins and Zakat Officers can update distribution calculation batch items"
+  ON public.distribution_calculation_batch_items FOR UPDATE
+  USING (
+    public.has_any_role(auth.uid(), ARRAY['super_admin', 'zakat_officer']::public.app_role[])
+    AND public.is_period_active(period_id)
+  )
+  WITH CHECK (
+    public.has_any_role(auth.uid(), ARRAY['super_admin', 'zakat_officer']::public.app_role[])
+    AND public.is_period_active(period_id)
+  );
+
+CREATE POLICY "Admins can delete distribution calculation batch items"
+  ON public.distribution_calculation_batch_items FOR DELETE
+  USING (
+    public.has_role(auth.uid(), 'super_admin')
+    AND public.is_period_active(period_id)
+  );
+
+-- =====================================================
+-- SECTION 27: RLS POLICIES - ASNAF SETTINGS
 -- =====================================================
 
 CREATE POLICY "Authenticated users can view asnaf settings"

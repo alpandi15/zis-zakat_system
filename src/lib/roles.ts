@@ -1,33 +1,43 @@
 // Application-level role definitions
 // These define the role hierarchy and permissions at the frontend level
 
-export type AppRole = 'super_admin' | 'chairman' | 'treasurer' | 'zakat_officer' | 'fidyah_officer' | 'viewer';
+export type AppRole =
+  | "super_admin"
+  | "chairman"
+  | "secretary"
+  | "treasurer"
+  | "zakat_officer"
+  | "fidyah_officer"
+  | "viewer";
 
 // Role categories
-export const ADMIN_ROLES: AppRole[] = ['super_admin', 'chairman'];
-export const PETUGAS_ROLES: AppRole[] = ['treasurer', 'zakat_officer', 'fidyah_officer', 'viewer'];
+export const SUPER_ADMIN_EQUIVALENT_ROLES: AppRole[] = ["super_admin", "chairman", "secretary", "treasurer"];
+export const ADMIN_ROLES: AppRole[] = [...SUPER_ADMIN_EQUIVALENT_ROLES];
+export const PETUGAS_ROLES: AppRole[] = ["zakat_officer", "fidyah_officer", "viewer"];
 
 // Default role assigned to new users
-export const DEFAULT_ROLE: AppRole = 'viewer';
+export const DEFAULT_ROLE: AppRole = "viewer";
 
 // Role display names (Indonesian)
 export const ROLE_LABELS: Record<AppRole, string> = {
-  super_admin: 'Super Admin',
-  chairman: 'Ketua',
-  treasurer: 'Bendahara',
-  zakat_officer: 'Petugas Zakat',
-  fidyah_officer: 'Petugas Fidyah',
-  viewer: 'Viewer',
+  super_admin: "Super Admin",
+  chairman: "Ketua",
+  secretary: "Sekretaris",
+  treasurer: "Bendahara",
+  zakat_officer: "Petugas Zakat",
+  fidyah_officer: "Petugas Fidyah",
+  viewer: "Viewer",
 };
 
 // Role descriptions
 export const ROLE_DESCRIPTIONS: Record<AppRole, string> = {
-  super_admin: 'Akses penuh ke semua fitur dan pengaturan sistem',
-  chairman: 'Akses penuh ke semua fitur sebagai ketua',
-  treasurer: 'Mengelola keuangan dan laporan',
-  zakat_officer: 'Mengelola transaksi dan distribusi zakat',
-  fidyah_officer: 'Mengelola transaksi dan distribusi fidyah',
-  viewer: 'Hanya dapat melihat data',
+  super_admin: "Akses penuh ke semua fitur dan pengaturan sistem",
+  chairman: "Akses penuh ke semua fitur sebagai ketua",
+  secretary: "Akses penuh ke semua fitur sebagai sekretaris",
+  treasurer: "Akses penuh ke semua fitur sebagai bendahara",
+  zakat_officer: "Mengelola transaksi dan distribusi zakat",
+  fidyah_officer: "Mengelola transaksi dan distribusi fidyah",
+  viewer: "Hanya dapat melihat data",
 };
 
 // Permission helpers
@@ -45,14 +55,17 @@ export const canManagePeriods = (roles: AppRole[]): boolean => hasAdminAccess(ro
 
 // Check if user can manage members/transactions
 export const canManageData = (roles: AppRole[]): boolean => 
-  roles.some(role => ['super_admin', 'chairman', 'treasurer', 'zakat_officer', 'fidyah_officer'].includes(role));
+  roles.some((role) =>
+    ["super_admin", "chairman", "secretary", "treasurer", "zakat_officer", "fidyah_officer"].includes(role),
+  );
 
 // All available roles for selection (used in admin UI)
 export const ALL_ROLES: AppRole[] = [
-  'super_admin',
-  'chairman', 
-  'treasurer',
-  'zakat_officer',
-  'fidyah_officer',
-  'viewer',
+  "super_admin",
+  "chairman",
+  "secretary",
+  "treasurer",
+  "zakat_officer",
+  "fidyah_officer",
+  "viewer",
 ];

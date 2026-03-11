@@ -39,7 +39,7 @@ import { Users, Plus, Trash2, Edit, Lock, Wheat, Coins, Heart, AlertCircle, Chec
 export default function AsnafSettings() {
   const { asnafSettings, isLoading, updateMutation, createMutation, deleteMutation, totalPercentage, isPercentageValid } = useAsnafSettings();
   const { hasRole } = useAuth();
-  const isAdmin = hasRole("super_admin") || hasRole("chairman");
+  const isAdmin = hasRole("super_admin");
 
   const [editingAsnaf, setEditingAsnaf] = useState<AsnafSetting | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);

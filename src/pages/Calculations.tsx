@@ -4,10 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
-import { DistributionPreviewTab } from "@/components/distribution/DistributionPreviewTab";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { useDistributionCalculation, type AmilDistributionMode } from "@/hooks/useDistributionCalculation";
-import type { Enums } from "@/integrations/supabase/types";
+import type { Enums, TablesInsert } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { Badge } from "@/components/ui/badge";
@@ -15,13 +14,52 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calculator, Coins, Wheat, Utensils, Scale, ArrowRight, Sparkles } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Calculator, Coins, Wheat, Utensils, Scale, ArrowRight, Sparkles, Lock } from "lucide-react";
+import { format } from "date-fns";
+import { id as idLocale } from "date-fns/locale";
 
 interface FundBalance {
-  category: string;
+  category: FundCategory;
   total_cash: number;
   total_rice_kg: number;
   total_food_kg: number;
+}
+
+interface FundLedgerRow {
+  category: FundCategory;
+  amount_cash: number | null;
+  amount_rice_kg: number | null;
+  amount_food_kg: number | null;
+}
+
+interface LockedBatchItemRow {
+  fund_category: FundCategory;
+  cash_amount: number;
+  rice_amount_kg: number;
+  food_amount_kg: number;
+  batch: { status: string } | null;
+}
+
+interface CalculationBatchRow {
+  id: string;
+  batch_no: number;
+  batch_code: string;
+  status: string;
+  notes: string | null;
+  locked_at: string;
+  total_allocated_cash: number;
+  total_allocated_rice_kg: number;
+  total_allocated_food_kg: number;
+  distributed_at: string | null;
 }
 
 type FundCategory = Enums<"fund_category">;
@@ -34,6 +72,14 @@ const normalizeAmilShareFactor = (factor: number | null | undefined): number => 
   return Math.max(0, Math.min(1, factor));
 };
 
+const FUND_CATEGORIES: FundCategory[] = [
+  "zakat_fitrah_cash",
+  "zakat_fitrah_rice",
+  "zakat_mal",
+  "fidyah_cash",
+  "fidyah_food",
+];
+
 const CATEGORY_META: Record<
   FundCategory,
   { label: string; icon: typeof Coins; accent: string; unit: "cash" | "rice" | "food" }
@@ -45,6 +91,23 @@ const CATEGORY_META: Record<
   fidyah_food: { label: "Fidyah Makanan", icon: Utensils, accent: "text-orange-600", unit: "food" },
 };
 
+const BATCH_STATUS_LABELS: Record<string, string> = {
+  locked: "Terkunci",
+  distributed: "Sudah Disalurkan",
+  cancelled: "Dibatalkan",
+};
+
+const toDisplayAmount = (unit: "cash" | "rice" | "food", value: number) =>
+  unit === "cash" ? formatCurrency(value) : `${value.toFixed(2)} kg`;
+
+const createEmptyBalanceMap = () =>
+  new Map<FundCategory, FundBalance>(
+    FUND_CATEGORIES.map((category) => [
+      category,
+      { category, total_cash: 0, total_rice_kg: 0, total_food_kg: 0 },
+    ]),
+  );
+
 export default function Calculations() {
   const { selectedPeriod, isReadOnly } = usePeriod();
   const { toast } = useToast();
@@ -52,6 +115,7 @@ export default function Calculations() {
 
   const [amilDistributionMode, setAmilDistributionMode] = useState<AmilDistributionMode>("percentage");
   const [amilShareFactor, setAmilShareFactor] = useState(0.5);
+  const [batchNotes, setBatchNotes] = useState("");
 
   const periodMode = normalizeAmilMode(selectedPeriod?.amil_distribution_mode);
   const periodShareFactor = normalizeAmilShareFactor(selectedPeriod?.amil_share_factor);
@@ -61,19 +125,6 @@ export default function Calculations() {
     setAmilDistributionMode(periodMode);
     setAmilShareFactor(periodShareFactor);
   }, [periodMode, periodShareFactor, selectedPeriod?.id]);
-
-  const { data: fundBalances = [] } = useQuery({
-    queryKey: ["fund-balances", selectedPeriod?.id],
-    queryFn: async () => {
-      if (!selectedPeriod?.id) return [];
-      const { data, error } = await supabase.rpc("get_all_fund_balances", {
-        _period_id: selectedPeriod.id,
-      });
-      if (error) throw error;
-      return data as FundBalance[];
-    },
-    enabled: !!selectedPeriod?.id,
-  });
 
   const { data: mustahikList = [] } = useQuery({
     queryKey: ["mustahik-active-full"],
@@ -97,45 +148,118 @@ export default function Calculations() {
     },
   });
 
-  const { data: zakatDist = [] } = useQuery({
-    queryKey: ["zakat_distributions", selectedPeriod?.id],
+  const { data: inflowRows = [] } = useQuery({
+    queryKey: ["fund-inflow-for-batch", selectedPeriod?.id],
     queryFn: async () => {
       if (!selectedPeriod?.id) return [];
+
       const { data, error } = await supabase
-        .from("zakat_distributions")
-        .select("mustahik_id, fund_category, status")
-        .eq("period_id", selectedPeriod.id);
+        .from("fund_ledger")
+        .select("category, amount_cash, amount_rice_kg, amount_food_kg")
+        .eq("period_id", selectedPeriod.id)
+        .in("transaction_type", ["collection", "adjustment", "transfer_in"]);
+
       if (error) throw error;
-      return data;
+      return data as FundLedgerRow[];
     },
     enabled: !!selectedPeriod?.id,
   });
 
-  const { data: fidyahDist = [] } = useQuery({
-    queryKey: ["fidyah_distributions", selectedPeriod?.id],
+  const { data: lockedBatchItems = [] } = useQuery({
+    queryKey: ["distribution-batch-items-for-lock-balance", selectedPeriod?.id],
     queryFn: async () => {
       if (!selectedPeriod?.id) return [];
+
       const { data, error } = await supabase
-        .from("fidyah_distributions")
-        .select("mustahik_id, fund_category, status")
+        .from("distribution_calculation_batch_items")
+        .select("fund_category, cash_amount, rice_amount_kg, food_amount_kg, batch:batch_id(status)")
         .eq("period_id", selectedPeriod.id);
+
       if (error) throw error;
-      return data;
+      return data as unknown as LockedBatchItemRow[];
     },
     enabled: !!selectedPeriod?.id,
   });
 
-  const existingDistributions = useMemo(() => {
-    return [...zakatDist, ...fidyahDist].map((d) => ({
-      mustahik_id: d.mustahik_id,
-      fund_category: d.fund_category,
-      status: d.status,
-    }));
-  }, [zakatDist, fidyahDist]);
+  const { data: lockedBatches = [] } = useQuery({
+    queryKey: ["distribution-calculation-batches", selectedPeriod?.id],
+    queryFn: async () => {
+      if (!selectedPeriod?.id) return [];
 
-  const calculations = useDistributionCalculation(mustahikList, fundBalances, existingDistributions, {
+      const { data, error } = await supabase
+        .from("distribution_calculation_batches")
+        .select(
+          "id, batch_no, batch_code, status, notes, locked_at, total_allocated_cash, total_allocated_rice_kg, total_allocated_food_kg, distributed_at",
+        )
+        .eq("period_id", selectedPeriod.id)
+        .order("batch_no", { ascending: false });
+
+      if (error) throw error;
+      return data as CalculationBatchRow[];
+    },
+    enabled: !!selectedPeriod?.id,
+  });
+
+  const inflowBalanceMap = useMemo(() => {
+    const map = createEmptyBalanceMap();
+
+    inflowRows.forEach((row) => {
+      const current = map.get(row.category);
+      if (!current) return;
+
+      current.total_cash += Math.max(0, Number(row.amount_cash || 0));
+      current.total_rice_kg += Math.max(0, Number(row.amount_rice_kg || 0));
+      current.total_food_kg += Math.max(0, Number(row.amount_food_kg || 0));
+    });
+
+    return map;
+  }, [inflowRows]);
+
+  const lockedBalanceMap = useMemo(() => {
+    const map = createEmptyBalanceMap();
+
+    lockedBatchItems.forEach((item) => {
+      if (item.batch?.status === "cancelled") return;
+
+      const current = map.get(item.fund_category);
+      if (!current) return;
+
+      current.total_cash += Math.max(0, Number(item.cash_amount || 0));
+      current.total_rice_kg += Math.max(0, Number(item.rice_amount_kg || 0));
+      current.total_food_kg += Math.max(0, Number(item.food_amount_kg || 0));
+    });
+
+    return map;
+  }, [lockedBatchItems]);
+
+  const availableForNextBatch = useMemo(() => {
+    return FUND_CATEGORIES.map((category) => {
+      const inflow = inflowBalanceMap.get(category) || {
+        category,
+        total_cash: 0,
+        total_rice_kg: 0,
+        total_food_kg: 0,
+      };
+      const locked = lockedBalanceMap.get(category) || {
+        category,
+        total_cash: 0,
+        total_rice_kg: 0,
+        total_food_kg: 0,
+      };
+
+      return {
+        category,
+        total_cash: Math.max(0, inflow.total_cash - locked.total_cash),
+        total_rice_kg: Math.max(0, inflow.total_rice_kg - locked.total_rice_kg),
+        total_food_kg: Math.max(0, inflow.total_food_kg - locked.total_food_kg),
+      };
+    });
+  }, [inflowBalanceMap, lockedBalanceMap]);
+
+  const calculations = useDistributionCalculation(mustahikList, availableForNextBatch, [], {
     amilDistributionMode,
     amilShareFactor,
+    excludeExistingDistributed: false,
   });
 
   const categorySummaries = useMemo(() => {
@@ -147,39 +271,61 @@ export default function Calculations() {
       fidyah_food: calculations.fidyahFood,
     };
 
-    return (Object.keys(CATEGORY_META) as FundCategory[]).map((category) => {
+    return FUND_CATEGORIES.map((category) => {
       const summary = map[category];
       const meta = CATEGORY_META[category];
-      const balance = fundBalances.find((b) => b.category === category) || {
+      const available = availableForNextBatch.find((b) => b.category === category) || {
         total_cash: 0,
         total_rice_kg: 0,
         total_food_kg: 0,
       };
-      const totalRecipients = summary.amil.length + summary.beneficiaries.length;
+      const inflow = inflowBalanceMap.get(category) || { total_cash: 0, total_rice_kg: 0, total_food_kg: 0 };
+      const locked = lockedBalanceMap.get(category) || { total_cash: 0, total_rice_kg: 0, total_food_kg: 0 };
 
-      const availableAmount =
+      const availableValue =
         meta.unit === "cash"
-          ? formatCurrency(balance.total_cash)
+          ? available.total_cash
           : meta.unit === "rice"
-            ? `${balance.total_rice_kg} kg`
-            : `${balance.total_food_kg} kg`;
+            ? available.total_rice_kg
+            : available.total_food_kg;
 
-      const allocatedAmount =
-        meta.unit === "cash"
-          ? formatCurrency(summary.amilTotal + summary.beneficiaryTotal)
-          : `${(summary.amilTotal + summary.beneficiaryTotal).toFixed(2)} kg`;
+      const inflowValue =
+        meta.unit === "cash" ? inflow.total_cash : meta.unit === "rice" ? inflow.total_rice_kg : inflow.total_food_kg;
+
+      const lockedValue =
+        meta.unit === "cash" ? locked.total_cash : meta.unit === "rice" ? locked.total_rice_kg : locked.total_food_kg;
+
+      const allocatedValue = summary.amilTotal + summary.beneficiaryTotal;
+      const totalRecipients = summary.amil.length + summary.beneficiaries.length;
 
       return {
         category,
         meta,
-        availableAmount,
-        allocatedAmount,
+        availableValue,
+        inflowValue,
+        lockedValue,
+        allocatedValue,
         totalRecipients,
         amilRecipients: summary.amil.length,
         mustahikRecipients: summary.beneficiaries.length,
       };
     });
-  }, [calculations, fundBalances]);
+  }, [calculations, availableForNextBatch, inflowBalanceMap, lockedBalanceMap]);
+
+  const totalAvailableCash = useMemo(
+    () => availableForNextBatch.reduce((sum, item) => sum + Number(item.total_cash || 0), 0),
+    [availableForNextBatch],
+  );
+
+  const totalAvailableRice = useMemo(
+    () => availableForNextBatch.reduce((sum, item) => sum + Number(item.total_rice_kg || 0), 0),
+    [availableForNextBatch],
+  );
+
+  const totalAvailableFood = useMemo(
+    () => availableForNextBatch.reduce((sum, item) => sum + Number(item.total_food_kg || 0), 0),
+    [availableForNextBatch],
+  );
 
   const saveDistributionConfigMutation = useMutation({
     mutationFn: async () => {
@@ -204,6 +350,129 @@ export default function Calculations() {
     },
   });
 
+  const lockCalculationBatchMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedPeriod?.id) throw new Error("Periode belum dipilih");
+
+      type BatchItemDraft = Omit<TablesInsert<"distribution_calculation_batch_items">, "batch_id">;
+
+      const toBatchItems = (): BatchItemDraft[] => {
+        const batchItems: BatchItemDraft[] = [];
+
+        const pushCategoryItems = (
+          category: FundCategory,
+          recipients: typeof calculations.zakatFitrahCash.amil,
+          isAmil: boolean,
+        ) => {
+          recipients.forEach((recipient) => {
+            const cashAmount = Math.max(0, Number(recipient.cashAmount || 0));
+            const riceAmount = Math.max(0, Number(recipient.riceAmount || 0));
+            const foodAmount = Math.max(0, Number(recipient.foodAmount || 0));
+
+            if (cashAmount <= 0 && riceAmount <= 0 && foodAmount <= 0) return;
+
+            batchItems.push({
+              period_id: selectedPeriod.id,
+              mustahik_id: recipient.mustahikId,
+              fund_category: category,
+              is_amil: isAmil,
+              asnaf_code: recipient.asnaf,
+              priority: recipient.priority as Enums<"priority_level">,
+              cash_amount: cashAmount,
+              rice_amount_kg: riceAmount,
+              food_amount_kg: foodAmount,
+            });
+          });
+        };
+
+        const categoryMap: Array<{
+          category: FundCategory;
+          distribution: typeof calculations.zakatFitrahCash;
+        }> = [
+          { category: "zakat_fitrah_cash", distribution: calculations.zakatFitrahCash },
+          { category: "zakat_fitrah_rice", distribution: calculations.zakatFitrahRice },
+          { category: "zakat_mal", distribution: calculations.zakatMal },
+          { category: "fidyah_cash", distribution: calculations.fidyahCash },
+          { category: "fidyah_food", distribution: calculations.fidyahFood },
+        ];
+
+        categoryMap.forEach(({ category, distribution }) => {
+          pushCategoryItems(category, distribution.amil, true);
+          pushCategoryItems(category, distribution.beneficiaries, false);
+        });
+
+        return batchItems;
+      };
+
+      const items = toBatchItems();
+      if (items.length === 0) {
+        throw new Error("Tidak ada alokasi yang bisa dikunci. Pastikan dana tersedia dan mustahik layak ada.");
+      }
+
+      const totalAllocatedCash = items.reduce((sum, item) => sum + Number(item.cash_amount || 0), 0);
+      const totalAllocatedRice = items.reduce((sum, item) => sum + Number(item.rice_amount_kg || 0), 0);
+      const totalAllocatedFood = items.reduce((sum, item) => sum + Number(item.food_amount_kg || 0), 0);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      const { data: batch, error: batchError } = await supabase
+        .from("distribution_calculation_batches")
+        .insert({
+          period_id: selectedPeriod.id,
+          locked_by: user?.id || null,
+          amil_distribution_mode: amilDistributionMode,
+          amil_share_factor: amilShareFactor,
+          status: "locked",
+          notes: batchNotes.trim() || null,
+          total_allocated_cash: totalAllocatedCash,
+          total_allocated_rice_kg: totalAllocatedRice,
+          total_allocated_food_kg: totalAllocatedFood,
+        })
+        .select("id, batch_code, batch_no")
+        .single();
+
+      if (batchError) throw batchError;
+
+      const payload = items.map((item) => ({ ...item, batch_id: batch.id }));
+      const { error: itemsError } = await supabase.from("distribution_calculation_batch_items").insert(payload);
+      if (itemsError) throw itemsError;
+
+      const lockCommonQuery = (table: "zakat_fitrah_transactions" | "zakat_mal_transactions" | "fidyah_transactions") =>
+        supabase
+          .from(table)
+          .update({ locked_batch_id: batch.id })
+          .eq("period_id", selectedPeriod.id)
+          .eq("is_void", false)
+          .is("locked_batch_id", null);
+
+      const [{ error: lockFitrahError }, { error: lockMalError }, { error: lockFidyahError }] = await Promise.all([
+        lockCommonQuery("zakat_fitrah_transactions"),
+        lockCommonQuery("zakat_mal_transactions"),
+        lockCommonQuery("fidyah_transactions"),
+      ]);
+
+      if (lockFitrahError) throw lockFitrahError;
+      if (lockMalError) throw lockMalError;
+      if (lockFidyahError) throw lockFidyahError;
+
+      return batch;
+    },
+    onSuccess: (batch) => {
+      setBatchNotes("");
+      queryClient.invalidateQueries({ queryKey: ["distribution-calculation-batches"] });
+      queryClient.invalidateQueries({ queryKey: ["distribution-batch-items-for-lock-balance"] });
+      queryClient.invalidateQueries({ queryKey: ["zakat-fitrah-transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["zakat-mal-transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["fidyah-transactions"] });
+      toast({ title: `Batch ${batch.batch_code || `#${batch.batch_no}`} berhasil dikunci` });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Gagal mengunci batch", description: error.message });
+    },
+  });
+
   return (
     <AppLayout title="Perhitungan Zakat & Fidyah">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
@@ -215,11 +484,11 @@ export default function Calculations() {
               <div className="space-y-2">
                 <div className="inline-flex items-center gap-2 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold tracking-wide">
                   <Sparkles className="h-3.5 w-3.5" />
-                  SIMULASI OTOMATIS
+                  SNAPSHOT + LOCK BATCH
                 </div>
-                <h2 className="text-2xl font-semibold md:text-3xl">Simulasi alokasi zakat dan fidyah lebih cepat</h2>
+                <h2 className="text-2xl font-semibold md:text-3xl">Kunci hasil perhitungan tanpa menunggu penerimaan selesai</h2>
                 <p className="max-w-2xl text-sm text-white/90 md:text-base">
-                  Simulasi mengikuti saldo dana periode terpilih, aturan asnaf, prioritas mustahik, dan konfigurasi porsi amil.
+                  Dana baru setelah batch dikunci akan otomatis masuk ke batch berikutnya. Panitia bisa langsung menyalurkan batch yang sudah dikunci.
                 </p>
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <Badge variant="secondary" className="bg-white/25 text-white hover:bg-white/25">
@@ -244,7 +513,7 @@ export default function Calculations() {
           <CardHeader>
             <CardTitle className="text-base">Konfigurasi Porsi Amil per Periode</CardTitle>
             <CardDescription>
-              Pengaturan ini tersimpan di periode aktif dan dipakai untuk seluruh simulasi alokasi zakat.
+              Pengaturan ini tersimpan di periode aktif dan dipakai untuk seluruh perhitungan batch.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-3">
@@ -297,11 +566,57 @@ export default function Calculations() {
           </CardContent>
         </Card>
 
+        <Card className="border-primary/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Lock className="h-4 w-4" />
+              Kunci Batch Perhitungan Saat Ini
+            </CardTitle>
+            <CardDescription>
+              Snapshot ini akan disimpan permanen. Dana yang sudah terkunci tidak akan ikut perhitungan batch berikutnya.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Tersedia Kas untuk Batch Baru</p>
+                <p className="text-lg font-semibold">{formatCurrency(totalAvailableCash)}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Tersedia Beras untuk Batch Baru</p>
+                <p className="text-lg font-semibold">{totalAvailableRice.toFixed(2)} kg</p>
+              </div>
+              <div className="rounded-lg border bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">Tersedia Fidyah Makanan untuk Batch Baru</p>
+                <p className="text-lg font-semibold">{totalAvailableFood.toFixed(2)} kg</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">Catatan batch (opsional)</p>
+              <Textarea
+                placeholder="Contoh: Batch penyaluran pekan 2 Ramadhan"
+                value={batchNotes}
+                onChange={(e) => setBatchNotes(e.target.value)}
+              />
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                onClick={() => lockCalculationBatchMutation.mutate()}
+                disabled={!selectedPeriod?.id || isReadOnly || lockCalculationBatchMutation.isPending}
+              >
+                {lockCalculationBatchMutation.isPending ? "Mengunci..." : "Kunci Batch Perhitungan"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         <section className="space-y-3">
           <div>
-            <h3 className="text-lg font-semibold">Ringkasan Hasil Simulasi</h3>
+            <h3 className="text-lg font-semibold">Ringkasan Dana untuk Batch Berikutnya</h3>
             <p className="text-sm text-muted-foreground">
-              Nilai di bawah adalah hasil simulasi saat ini berdasarkan saldo dana yang sudah tercatat.
+              Sumber = dana masuk kumulatif, dikurangi semua dana yang sudah pernah dikunci batch.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -314,21 +629,24 @@ export default function Calculations() {
                       <Icon className={`h-4 w-4 ${item.meta.accent}`} />
                       {item.meta.label}
                     </CardDescription>
-                    <CardTitle className="text-base">{item.availableAmount}</CardTitle>
+                    <CardTitle className="text-base">{toDisplayAmount(item.meta.unit, item.availableValue)}</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 text-xs text-muted-foreground">
-                    <p>Alokasi simulasi: <span className="font-medium text-foreground">{item.allocatedAmount}</span></p>
                     <div className="flex items-center justify-between">
-                      <span>Total penerima</span>
+                      <span>Dana masuk</span>
+                      <span className="font-medium text-foreground">{toDisplayAmount(item.meta.unit, item.inflowValue)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Sudah dikunci</span>
+                      <span className="font-medium text-foreground">{toDisplayAmount(item.meta.unit, item.lockedValue)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Alokasi batch ini</span>
+                      <span className="font-medium text-foreground">{toDisplayAmount(item.meta.unit, item.allocatedValue)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Penerima</span>
                       <span className="font-medium text-foreground">{item.totalRecipients}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Amil</span>
-                      <span className="font-medium text-foreground">{item.amilRecipients}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Mustahik lain</span>
-                      <span className="font-medium text-foreground">{item.mustahikRecipients}</span>
                     </div>
                   </CardContent>
                 </Card>
@@ -337,19 +655,52 @@ export default function Calculations() {
           </div>
         </section>
 
-        {selectedPeriod?.id ? (
-          <DistributionPreviewTab
-            periodId={selectedPeriod.id}
-            amilDistributionMode={amilDistributionMode}
-            amilShareFactor={amilShareFactor}
-          />
-        ) : (
-          <Card>
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              Pilih periode terlebih dahulu untuk melihat simulasi.
-            </CardContent>
-          </Card>
-        )}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Riwayat Batch Perhitungan</CardTitle>
+            <CardDescription>
+              Batch yang sudah dikunci dapat langsung diproses di menu Pendistribusian.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {lockedBatches.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">Belum ada batch terkunci pada periode ini.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Batch</TableHead>
+                    <TableHead>Tanggal Kunci</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Kas</TableHead>
+                    <TableHead className="text-right">Beras</TableHead>
+                    <TableHead className="text-right">Makanan</TableHead>
+                    <TableHead>Catatan</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lockedBatches.map((batch) => (
+                    <TableRow key={batch.id}>
+                      <TableCell className="font-medium">{batch.batch_code || `BATCH-${batch.batch_no}`}</TableCell>
+                      <TableCell>
+                        {format(new Date(batch.locked_at), "dd MMM yyyy HH:mm", { locale: idLocale })}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={batch.status === "distributed" ? "default" : "outline"}>
+                          {BATCH_STATUS_LABELS[batch.status] || batch.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">{formatCurrency(batch.total_allocated_cash || 0)}</TableCell>
+                      <TableCell className="text-right">{(batch.total_allocated_rice_kg || 0).toFixed(2)} kg</TableCell>
+                      <TableCell className="text-right">{(batch.total_allocated_food_kg || 0).toFixed(2)} kg</TableCell>
+                      <TableCell className="text-muted-foreground">{batch.notes || "-"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </AppLayout>
   );

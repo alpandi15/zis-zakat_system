@@ -259,7 +259,7 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Super Admin Only */}
+        {/* Super-admin-equivalent roles */}
         {hasRole('super_admin') && (
           <SidebarGroup>
             <SidebarGroupLabel className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
