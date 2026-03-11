@@ -34,7 +34,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Edit, Plus, UserCheck, UserX, History } from "lucide-react";
+import { ArrowLeft, Edit, Plus, UserCheck, UserX, History, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 
@@ -64,6 +64,10 @@ interface ZakatFitrahItem {
     hijri_year: number;
   };
 }
+
+type DeleteResult = {
+  mode: "deleted" | "deactivated";
+};
 
 const RELATIONSHIP_LABELS: Record<string, string> = {
   head_of_family: "Kepala Keluarga",
@@ -208,6 +212,181 @@ export default function MuzakkiDetail() {
     });
   };
 
+  const deleteMemberMutation = useMutation({
+    mutationFn: async (memberId: string): Promise<DeleteResult> => {
+      const { data: deletedRows, error } = await supabase
+        .from("muzakki_members")
+        .delete()
+        .eq("id", memberId)
+        .select("id");
+
+      if (error) {
+        const errorCode = (error as { code?: string } | null)?.code;
+        const shouldFallbackToDeactivate = errorCode === "23503" || errorCode === "42501";
+        if (!shouldFallbackToDeactivate) {
+          throw error;
+        }
+      }
+
+      if ((deletedRows?.length ?? 0) > 0) {
+        return { mode: "deleted" };
+      }
+
+      const { data: deactivatedRows, error: deactivateError } = await supabase
+        .from("muzakki_members")
+        .update({ is_active: false, is_dependent: false })
+        .eq("id", memberId)
+        .select("id");
+
+      if (deactivateError) throw deactivateError;
+      if ((deactivatedRows?.length ?? 0) === 0) {
+        throw new Error("Data anggota tidak ditemukan atau Anda tidak memiliki izin hapus/nonaktifkan.");
+      }
+
+      return { mode: "deactivated" };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members", muzakkiId] });
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members"] });
+      toast({
+        title:
+          result.mode === "deleted"
+            ? "Anggota berhasil dihapus"
+            : "Anggota tidak bisa dihapus permanen, data dinonaktifkan",
+      });
+    },
+    onError: (error: { message: string; code?: string }) => {
+      const detail = error.code
+        ? `[${error.code}] ${error.message}`
+        : error.message;
+      toast({ variant: "destructive", title: "Gagal menghapus anggota", description: detail });
+    },
+  });
+
+  const deleteMuzakkiMutation = useMutation({
+    mutationFn: async (): Promise<DeleteResult> => {
+      if (!muzakkiId) {
+        throw new Error("ID muzakki tidak valid.");
+      }
+
+      const { data: deletedRows, error } = await supabase
+        .from("muzakki")
+        .delete()
+        .eq("id", muzakkiId)
+        .select("id");
+
+      if (error) {
+        const errorCode = (error as { code?: string } | null)?.code;
+        const shouldFallbackToDeactivate = errorCode === "23503" || errorCode === "42501";
+        if (!shouldFallbackToDeactivate) {
+          throw error;
+        }
+      }
+
+      if ((deletedRows?.length ?? 0) > 0) {
+        return { mode: "deleted" };
+      }
+
+      const { data: deactivatedMuzakkiRows, error: deactivateMuzakkiError } = await supabase
+        .from("muzakki")
+        .update({ is_active: false })
+        .eq("id", muzakkiId)
+        .select("id");
+
+      if (deactivateMuzakkiError) throw deactivateMuzakkiError;
+      if ((deactivatedMuzakkiRows?.length ?? 0) === 0) {
+        throw new Error("Data muzakki tidak ditemukan atau Anda tidak memiliki izin hapus/nonaktifkan.");
+      }
+
+      const { error: deactivateMembersError } = await supabase
+        .from("muzakki_members")
+        .update({ is_active: false, is_dependent: false })
+        .eq("muzakki_id", muzakkiId);
+
+      if (deactivateMembersError) throw deactivateMembersError;
+
+      return { mode: "deactivated" };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["muzakki"] });
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members"] });
+      toast({
+        title:
+          result.mode === "deleted"
+            ? "Muzakki berhasil dihapus (anggota ikut terhapus)"
+            : "Muzakki tidak bisa dihapus permanen, data dinonaktifkan",
+      });
+      router.push("/muzakki");
+    },
+    onError: (error: { message: string; code?: string }) => {
+      const detail = error.code
+        ? `[${error.code}] ${error.message}`
+        : error.message;
+      toast({ variant: "destructive", title: "Gagal menghapus muzakki", description: detail });
+    },
+  });
+
+  const toggleMuzakkiStatusMutation = useMutation({
+    mutationFn: async () => {
+      if (!muzakkiId || !muzakki) {
+        throw new Error("ID muzakki tidak valid.");
+      }
+      const nextActive = !muzakki.is_active;
+      const { error: muzakkiError } = await supabase
+        .from("muzakki")
+        .update({ is_active: nextActive })
+        .eq("id", muzakkiId);
+      if (muzakkiError) throw muzakkiError;
+
+      if (!nextActive) {
+        const { error: membersError } = await supabase
+          .from("muzakki_members")
+          .update({ is_active: false, is_dependent: false })
+          .eq("muzakki_id", muzakkiId);
+        if (membersError) throw membersError;
+      }
+
+      return { nextActive };
+    },
+    onSuccess: ({ nextActive }) => {
+      queryClient.invalidateQueries({ queryKey: ["muzakki", muzakkiId] });
+      queryClient.invalidateQueries({ queryKey: ["muzakki"] });
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members", muzakkiId] });
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members"] });
+      toast({
+        title: nextActive ? "Muzakki diaktifkan" : "Muzakki dinonaktifkan",
+        description: nextActive
+          ? "Anda bisa aktifkan anggota secara manual bila diperlukan."
+          : "Semua anggota keluarga otomatis ikut dinonaktifkan.",
+      });
+    },
+    onError: (error: { message: string; code?: string }) => {
+      const detail = error.code ? `[${error.code}] ${error.message}` : error.message;
+      toast({ variant: "destructive", title: "Gagal mengubah status muzakki", description: detail });
+    },
+  });
+
+  const handleDeleteMember = (member: MuzakkiMember) => {
+    const confirmed = window.confirm(`Hapus anggota "${member.name}"?`);
+    if (!confirmed) return;
+    deleteMemberMutation.mutate(member.id);
+  };
+
+  const handleDeleteMuzakki = () => {
+    const confirmed = window.confirm(
+      `Hapus muzakki "${muzakki.name}"?\n\nSemua anggota keluarga pada muzakki ini juga akan terhapus.`,
+    );
+    if (!confirmed) return;
+    deleteMuzakkiMutation.mutate();
+  };
+
+  const handleToggleMuzakkiStatus = () => {
+    const actionLabel = muzakki.is_active ? "Nonaktifkan" : "Aktifkan";
+    const confirmed = window.confirm(`${actionLabel} muzakki "${muzakki.name}"?`);
+    if (!confirmed) return;
+    toggleMuzakkiStatusMutation.mutate();
+  };
+
   const resetMemberForm = () => {
     setMemberForm({
       name: "",
@@ -275,9 +454,32 @@ export default function MuzakkiDetail() {
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <span>Informasi Muzakki</span>
-              <Badge variant={muzakki.is_active ? "default" : "secondary"}>
-                {muzakki.is_active ? "Aktif" : "Nonaktif"}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant={muzakki.is_active ? "default" : "secondary"}>
+                  {muzakki.is_active ? "Aktif" : "Nonaktif"}
+                </Badge>
+                {!isReadOnly && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleToggleMuzakkiStatus}
+                      title={muzakki.is_active ? "Nonaktifkan Muzakki" : "Aktifkan Muzakki"}
+                    >
+                      {muzakki.is_active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive"
+                      onClick={handleDeleteMuzakki}
+                      title="Hapus Muzakki"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -395,6 +597,15 @@ export default function MuzakkiDetail() {
                                 ) : (
                                   <UserCheck className="h-4 w-4" />
                                 )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive"
+                                onClick={() => handleDeleteMember(member)}
+                                title="Hapus Anggota"
+                              >
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             </>
                           )}

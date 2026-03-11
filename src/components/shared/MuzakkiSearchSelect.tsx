@@ -189,8 +189,9 @@ export function MuzakkiSearchSelect({
     setMembers(members.map(m => (m.id === id ? { ...m, [field]: value } : m)));
   };
 
-  const handleNextStep = (e: React.FormEvent) => {
+  const handleNextStep = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     if (!muzakkiData.name.trim()) {
       toast({ variant: "destructive", title: "Nama muzakki harus diisi" });
       return;
@@ -198,8 +199,9 @@ export function MuzakkiSearchSelect({
     setStep(2);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     const validMembers = members.filter(m => m.name.trim());
     if (validMembers.length === 0) {
       toast({ variant: "destructive", title: "Minimal satu anggota harus diisi" });
@@ -217,6 +219,7 @@ export function MuzakkiSearchSelect({
             role="combobox"
             aria-expanded={open}
             disabled={disabled}
+            type="button"
             className="w-full justify-between font-normal"
           >
             {selectedMuzakki ? selectedMuzakki.name : placeholder}
@@ -234,7 +237,7 @@ export function MuzakkiSearchSelect({
               <CommandEmpty>
                 <div className="py-2 text-center">
                   <p className="text-sm text-muted-foreground mb-2">Tidak ditemukan</p>
-                  <Button size="sm" onClick={handleOpenCreate} className="gap-1">
+                  <Button type="button" size="sm" onClick={handleOpenCreate} className="gap-1">
                     <Plus className="h-4 w-4" />
                     Tambah "{search || 'Muzakki Baru'}"
                   </Button>

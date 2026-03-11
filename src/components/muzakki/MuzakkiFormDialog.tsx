@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -96,10 +96,11 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
     ]);
   };
 
-  const handleOpenChange = (open: boolean) => {
-    if (!open) {
-      resetForm();
-    } else if (editingMuzakki) {
+  useEffect(() => {
+    if (!open) return;
+
+    if (editingMuzakki) {
+      setStep(1);
       setMuzakkiData({
         name: editingMuzakki.name,
         address: editingMuzakki.address || "",
@@ -107,6 +108,15 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
         email: editingMuzakki.email || "",
         notes: editingMuzakki.notes || "",
       });
+      return;
+    }
+
+    resetForm();
+  }, [open, editingMuzakki]);
+
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      resetForm();
     }
     onOpenChange(open);
   };

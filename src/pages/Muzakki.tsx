@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { DataTable, Column } from "@/components/shared/DataTable";
@@ -8,8 +8,9 @@ import { usePeriod } from "@/contexts/PeriodContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useRouter } from "next/router";
-import { Edit, Eye, Users } from "lucide-react";
+import { Edit, Eye, Trash2, Users, UserCheck, UserX } from "lucide-react";
 import { MuzakkiFormDialog } from "@/components/muzakki/MuzakkiFormDialog";
+import { useToast } from "@/hooks/use-toast";
 
 interface Muzakki {
   id: string;
@@ -23,12 +24,18 @@ interface Muzakki {
   member_count?: number;
 }
 
+type DeleteResult = {
+  mode: "deleted" | "deactivated";
+};
+
 export default function MuzakkiPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingMuzakki, setEditingMuzakki] = useState<Muzakki | null>(null);
 
   const { isReadOnly, selectedPeriod } = usePeriod();
   const router = useRouter();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { data: muzakkiList = [], isLoading } = useQuery({
     queryKey: ["muzakki"],
@@ -75,6 +82,114 @@ export default function MuzakkiPage() {
 
   const handleViewDetail = (muzakki: Muzakki) => {
     router.push(`/muzakki/${muzakki.id}`);
+  };
+
+  const deleteMuzakkiMutation = useMutation({
+    mutationFn: async (id: string): Promise<DeleteResult> => {
+      const { data: deletedRows, error } = await supabase
+        .from("muzakki")
+        .delete()
+        .eq("id", id)
+        .select("id");
+
+      if (error) {
+        const errorCode = (error as { code?: string } | null)?.code;
+        const shouldFallbackToDeactivate = errorCode === "23503" || errorCode === "42501";
+        if (!shouldFallbackToDeactivate) {
+          throw error;
+        }
+      }
+
+      if ((deletedRows?.length ?? 0) > 0) {
+        return { mode: "deleted" };
+      }
+
+      const { data: deactivatedRows, error: deactivateMuzakkiError } = await supabase
+        .from("muzakki")
+        .update({ is_active: false })
+        .eq("id", id)
+        .select("id");
+
+      if (deactivateMuzakkiError) throw deactivateMuzakkiError;
+      if ((deactivatedRows?.length ?? 0) === 0) {
+        throw new Error("Data muzakki tidak ditemukan atau Anda tidak memiliki izin hapus/nonaktifkan.");
+      }
+
+      const { error: deactivateMembersError } = await supabase
+        .from("muzakki_members")
+        .update({ is_active: false, is_dependent: false })
+        .eq("muzakki_id", id);
+
+      if (deactivateMembersError) throw deactivateMembersError;
+
+      return { mode: "deactivated" };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["muzakki"] });
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members"] });
+      toast({
+        title:
+          result.mode === "deleted"
+            ? "Muzakki berhasil dihapus (anggota ikut terhapus)"
+            : "Muzakki tidak bisa dihapus permanen, data dinonaktifkan",
+      });
+    },
+    onError: (error: { message: string; code?: string }) => {
+      const detail = error.code
+        ? `[${error.code}] ${error.message}`
+        : error.message;
+      toast({ variant: "destructive", title: "Gagal menghapus muzakki", description: detail });
+    },
+  });
+
+  const toggleStatusMutation = useMutation({
+    mutationFn: async (target: Pick<Muzakki, "id" | "name" | "is_active">) => {
+      const nextActive = !target.is_active;
+      const { error: muzakkiError } = await supabase
+        .from("muzakki")
+        .update({ is_active: nextActive })
+        .eq("id", target.id);
+      if (muzakkiError) throw muzakkiError;
+
+      if (!nextActive) {
+        const { error: membersError } = await supabase
+          .from("muzakki_members")
+          .update({ is_active: false, is_dependent: false })
+          .eq("muzakki_id", target.id);
+        if (membersError) throw membersError;
+      }
+
+      return { nextActive, name: target.name };
+    },
+    onSuccess: ({ nextActive, name }) => {
+      queryClient.invalidateQueries({ queryKey: ["muzakki"] });
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members"] });
+      toast({
+        title: nextActive ? `Muzakki "${name}" diaktifkan` : `Muzakki "${name}" dinonaktifkan`,
+        description: nextActive
+          ? "Anda bisa aktifkan anggota secara manual bila diperlukan."
+          : "Semua anggota keluarga otomatis ikut dinonaktifkan.",
+      });
+    },
+    onError: (error: { message: string; code?: string }) => {
+      const detail = error.code ? `[${error.code}] ${error.message}` : error.message;
+      toast({ variant: "destructive", title: "Gagal mengubah status muzakki", description: detail });
+    },
+  });
+
+  const handleDelete = (muzakki: Muzakki) => {
+    const confirmed = window.confirm(
+      `Hapus muzakki "${muzakki.name}"?\n\nSemua anggota keluarga pada muzakki ini juga akan terhapus.`,
+    );
+    if (!confirmed) return;
+    deleteMuzakkiMutation.mutate(muzakki.id);
+  };
+
+  const handleToggleStatus = (muzakki: Muzakki) => {
+    const actionLabel = muzakki.is_active ? "Nonaktifkan" : "Aktifkan";
+    const confirmed = window.confirm(`${actionLabel} muzakki "${muzakki.name}"?`);
+    if (!confirmed) return;
+    toggleStatusMutation.mutate(muzakki);
   };
 
   const columns: Column<Muzakki>[] = [
@@ -136,14 +251,33 @@ export default function MuzakkiPage() {
               <Users className="h-4 w-4" />
             </Button>
             {!isReadOnly ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleEdit(muzakki)}
-                title="Edit Info Muzakki"
-              >
-                <Edit className="h-4 w-4" />
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleEdit(muzakki)}
+                  title="Edit Info Muzakki"
+                >
+                  <Edit className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleToggleStatus(muzakki)}
+                  title={muzakki.is_active ? "Nonaktifkan Muzakki" : "Aktifkan Muzakki"}
+                >
+                  {muzakki.is_active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-destructive"
+                  onClick={() => handleDelete(muzakki)}
+                  title="Hapus Muzakki"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </>
             ) : (
               <Button variant="ghost" size="icon" title="Lihat Detail">
                 <Eye className="h-4 w-4" />

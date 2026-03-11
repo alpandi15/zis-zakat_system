@@ -49,6 +49,7 @@ interface Transaction {
   muzakki_id: string;
   period_id: string;
   payment_type: "rice" | "money";
+  is_custom_total_rice: boolean;
   rice_amount_kg: number | null;
   money_amount: number | null;
   rice_price_per_kg: number | null;
@@ -93,8 +94,10 @@ export default function ZakatFitrah() {
   // Override states
   const [isOverrideRice, setIsOverrideRice] = useState(false);
   const [isOverrideCash, setIsOverrideCash] = useState(false);
+  const [isOverrideTotalRice, setIsOverrideTotalRice] = useState(false);
   const [customRicePerPerson, setCustomRicePerPerson] = useState(0);
   const [customCashPerPerson, setCustomCashPerPerson] = useState(0);
+  const [customTotalRiceKg, setCustomTotalRiceKg] = useState(0);
 
   // Get period configuration values
   const periodRicePerPerson = selectedPeriod?.rice_amount_per_person ?? DEFAULT_RICE_PER_PERSON_KG;
@@ -103,6 +106,11 @@ export default function ZakatFitrah() {
   // Use custom or period values
   const ricePerPerson = isOverrideRice ? customRicePerPerson : periodRicePerPerson;
   const cashPerPerson = isOverrideCash ? customCashPerPerson : periodCashPerPerson;
+  const totalMembersCount = selectedMembers.length;
+  const calculatedRiceTotal = totalMembersCount * ricePerPerson;
+  const totalRiceAmount = isOverrideTotalRice ? customTotalRiceKg : calculatedRiceTotal;
+  const effectiveRicePerPerson =
+    totalMembersCount > 0 ? Math.round((totalRiceAmount / totalMembersCount) * 1000) / 1000 : ricePerPerson;
 
   // Fetch transactions for selected period
   const { data: transactions = [], isLoading } = useQuery({
@@ -197,7 +205,13 @@ export default function ZakatFitrah() {
       }
 
       const totalMembers = selectedMembers.length;
-      const riceAmount = paymentType === "rice" ? totalMembers * ricePerPerson : null;
+      const calculatedRiceAmount = totalMembers * ricePerPerson;
+      const riceAmount =
+        paymentType === "rice" ? (isOverrideTotalRice ? customTotalRiceKg : calculatedRiceAmount) : null;
+      const perMemberRiceAmount =
+        paymentType === "rice"
+          ? Math.round((((riceAmount ?? 0) / totalMembers) || ricePerPerson) * 1000) / 1000
+          : null;
       const moneyAmount = paymentType === "money" ? totalMembers * cashPerPerson : null;
 
       // Create main transaction
@@ -207,6 +221,7 @@ export default function ZakatFitrah() {
           muzakki_id: selectedMuzakkiId,
           period_id: selectedPeriod.id,
           payment_type: paymentType,
+          is_custom_total_rice: paymentType === "rice" ? isOverrideTotalRice : false,
           rice_amount_kg: riceAmount,
           money_amount: moneyAmount,
           rice_price_per_kg: paymentType === "money" ? (cashPerPerson / ricePerPerson) : null,
@@ -223,7 +238,7 @@ export default function ZakatFitrah() {
         transaction_id: transaction.id,
         muzakki_member_id: memberId,
         period_id: selectedPeriod.id,
-        rice_amount_kg: paymentType === "rice" ? ricePerPerson : null,
+        rice_amount_kg: perMemberRiceAmount,
         money_amount: paymentType === "money" ? cashPerPerson : null,
       }));
 
@@ -272,8 +287,10 @@ export default function ZakatFitrah() {
     setNotes("");
     setIsOverrideRice(false);
     setIsOverrideCash(false);
+    setIsOverrideTotalRice(false);
     setCustomRicePerPerson(periodRicePerPerson);
     setCustomCashPerPerson(periodCashPerPerson);
+    setCustomTotalRiceKg(0);
   };
 
   const toggleMember = (memberId: string, alreadyPaid: boolean) => {
@@ -291,11 +308,10 @@ export default function ZakatFitrah() {
   };
 
   const calculateTotal = () => {
-    const count = selectedMembers.length;
     if (paymentType === "rice") {
-      return `${(count * ricePerPerson).toFixed(2)} kg beras`;
+      return `${totalRiceAmount.toFixed(2)} kg beras`;
     }
-    return formatCurrency(count * cashPerPerson);
+    return formatCurrency(totalMembersCount * cashPerPerson);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -352,9 +368,14 @@ export default function ZakatFitrah() {
                       </TableCell>
                       <TableCell className="font-medium">{tx.muzakki?.name}</TableCell>
                       <TableCell>
-                        <Badge variant="outline">
-                          {tx.payment_type === "rice" ? "Beras" : "Uang"}
-                        </Badge>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline">
+                            {tx.payment_type === "rice" ? "Beras" : "Uang"}
+                          </Badge>
+                          {tx.payment_type === "rice" && tx.is_custom_total_rice && (
+                            <Badge variant="secondary">Custom Total</Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>{tx.total_members} orang</TableCell>
                       <TableCell className="text-right">
@@ -489,6 +510,52 @@ export default function ZakatFitrah() {
                       {periodRicePerPerson} kg (dari periode)
                     </p>
                   )}
+
+                  <div className="mt-3 space-y-2 rounded-md border border-dashed p-3">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="overrideTotalRice" className="text-sm">
+                        Total beras diterima
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">Override</span>
+                        <Switch
+                          id="overrideTotalRice"
+                          checked={isOverrideTotalRice}
+                          onCheckedChange={(checked) => {
+                            setIsOverrideTotalRice(checked);
+                            if (checked) {
+                              setCustomTotalRiceKg(calculatedRiceTotal);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                    {isOverrideTotalRice ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min={0}
+                            value={customTotalRiceKg}
+                            onChange={(e) => setCustomTotalRiceKg(Number(e.target.value) || 0)}
+                            className="border-amber-500"
+                          />
+                          <span className="text-sm">kg</span>
+                          <Badge variant="outline" className="text-amber-600 border-amber-500">
+                            Custom Total
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Auto hitung per orang: {effectiveRicePerPerson.toFixed(3)} kg
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Total otomatis: {calculatedRiceTotal.toFixed(2)} kg ({totalMembersCount} orang)
+                      </p>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -508,11 +575,10 @@ export default function ZakatFitrah() {
                   </div>
                   {isOverrideCash ? (
                     <div className="flex items-center gap-2">
-                      <span className="text-sm">Rp</span>
-                      <Input
-                        type="number"
+                      <CurrencyInput
+                        id="customCashPerPerson"
                         value={customCashPerPerson}
-                        onChange={(e) => setCustomCashPerPerson(Number(e.target.value))}
+                        onChange={setCustomCashPerPerson}
                         className="border-amber-500"
                       />
                       <Badge variant="outline" className="text-amber-600 border-amber-500">Custom</Badge>
@@ -542,7 +608,12 @@ export default function ZakatFitrah() {
                   <div className="flex justify-between items-center">
                     <div>
                       <p className="text-sm text-muted-foreground">Total Pembayaran</p>
-                      <p className="font-semibold">{selectedMembers.length} orang × {paymentType === "rice" ? `${ricePerPerson} kg` : `Rp ${cashPerPerson.toLocaleString("id-ID")}`}</p>
+                      <p className="font-semibold">
+                        {totalMembersCount} orang ×{" "}
+                        {paymentType === "rice"
+                          ? `${effectiveRicePerPerson.toFixed(3)} kg`
+                          : `Rp ${cashPerPerson.toLocaleString("id-ID")}`}
+                      </p>
                     </div>
                     <div className="text-right">
                       <p className="text-lg font-bold">{calculateTotal()}</p>

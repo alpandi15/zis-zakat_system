@@ -3,8 +3,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { DataTable, Column } from "@/components/shared/DataTable";
+import { CurrencyInput } from "@/components/shared/CurrencyInput";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Dialog,
   DialogContent,
@@ -14,9 +21,23 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { Edit, Archive, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { format, isValid, parseISO } from "date-fns";
+import { id as idLocale } from "date-fns/locale";
+import { formatCurrency } from "@/lib/formatCurrency";
+import {
+  Edit,
+  Archive,
+  Trash2,
+  Calendar as CalendarIcon,
+  Eye,
+  Wheat,
+  Coins,
+  Shield,
+} from "lucide-react";
 
 interface Period {
   id: string;
@@ -38,6 +59,7 @@ interface Period {
 export default function Periods() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingPeriod, setEditingPeriod] = useState<Period | null>(null);
+  const [viewingPeriod, setViewingPeriod] = useState<Period | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     hijri_year: new Date().getFullYear() - 579,
@@ -223,6 +245,24 @@ export default function Periods() {
   ];
 
   const canManage = canManagePeriods();
+  const parseDateValue = (value: string) => {
+    if (!value) return undefined;
+    const parsed = parseISO(value);
+    return isValid(parsed) ? parsed : undefined;
+  };
+
+  const formatDateDisplay = (value: string | null) => {
+    if (!value) return "-";
+    const parsed = parseISO(value);
+    return isValid(parsed) ? format(parsed, "dd MMMM yyyy", { locale: idLocale }) : "-";
+  };
+
+  const handleDateChange = (key: "start_date" | "end_date", value?: Date) => {
+    setFormData((prev) => ({
+      ...prev,
+      [key]: value ? format(value, "yyyy-MM-dd") : "",
+    }));
+  };
 
   return (
     <AppLayout title="Manajemen Periode">
@@ -241,9 +281,17 @@ export default function Periods() {
         searchKey="name"
         searchPlaceholder="Cari periode..."
         emptyMessage="Belum ada periode"
-        actions={canManage ? (period) => (
+        actions={(period) => (
           <div className="flex gap-1">
-            {period.status === "active" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setViewingPeriod(period)}
+              title="Lihat detail periode"
+            >
+              <Eye className="h-4 w-4" />
+            </Button>
+            {canManage && period.status === "active" && (
               <>
                 <Button
                   variant="ghost"
@@ -261,7 +309,7 @@ export default function Periods() {
                 </Button>
               </>
             )}
-            {period.status === "active" && hasRole("super_admin") && (
+            {canManage && period.status === "active" && hasRole("super_admin") && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -272,7 +320,7 @@ export default function Periods() {
               </Button>
             )}
           </div>
-        ) : undefined}
+        )}
       />
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -318,21 +366,65 @@ export default function Periods() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="start_date">Tanggal Mulai</Label>
-                <Input
-                  id="start_date"
-                  type="date"
-                  value={formData.start_date}
-                  onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="start_date"
+                      type="button"
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !formData.start_date && "text-muted-foreground",
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {formData.start_date ? (
+                        format(parseISO(formData.start_date), "dd MMMM yyyy", { locale: idLocale })
+                      ) : (
+                        <span>Pilih tanggal mulai</span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={parseDateValue(formData.start_date)}
+                      onSelect={(date) => handleDateChange("start_date", date)}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="end_date">Tanggal Selesai</Label>
-                <Input
-                  id="end_date"
-                  type="date"
-                  value={formData.end_date}
-                  onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="end_date"
+                      type="button"
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !formData.end_date && "text-muted-foreground",
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {formData.end_date ? (
+                        format(parseISO(formData.end_date), "dd MMMM yyyy", { locale: idLocale })
+                      ) : (
+                        <span>Pilih tanggal selesai</span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={parseDateValue(formData.end_date)}
+                      onSelect={(date) => handleDateChange("end_date", date)}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
             <div className="space-y-2">
@@ -361,38 +453,34 @@ export default function Periods() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="cash_amount_per_person">Uang per Orang (Rp)</Label>
-                  <Input
+                  <CurrencyInput
                     id="cash_amount_per_person"
-                    type="number"
                     value={formData.cash_amount_per_person}
-                    onChange={(e) => setFormData({ ...formData, cash_amount_per_person: parseFloat(e.target.value) })}
+                    onChange={(value) => setFormData({ ...formData, cash_amount_per_person: value })}
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="fidyah_daily_rate">Fidyah per Hari (Rp)</Label>
-                  <Input
+                  <CurrencyInput
                     id="fidyah_daily_rate"
-                    type="number"
                     value={formData.fidyah_daily_rate}
-                    onChange={(e) => setFormData({ ...formData, fidyah_daily_rate: parseFloat(e.target.value) })}
+                    onChange={(value) => setFormData({ ...formData, fidyah_daily_rate: value })}
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="nisab_gold_price_per_gram">Harga Emas/gram (Rp)</Label>
-                  <Input
+                  <CurrencyInput
                     id="nisab_gold_price_per_gram"
-                    type="number"
                     value={formData.nisab_gold_price_per_gram}
-                    onChange={(e) => setFormData({ ...formData, nisab_gold_price_per_gram: parseFloat(e.target.value) })}
+                    onChange={(value) => setFormData({ ...formData, nisab_gold_price_per_gram: value })}
                   />
                 </div>
                 <div className="space-y-2 col-span-2">
                   <Label htmlFor="nisab_silver_price_per_gram">Harga Perak/gram (Rp)</Label>
-                  <Input
+                  <CurrencyInput
                     id="nisab_silver_price_per_gram"
-                    type="number"
                     value={formData.nisab_silver_price_per_gram}
-                    onChange={(e) => setFormData({ ...formData, nisab_silver_price_per_gram: parseFloat(e.target.value) })}
+                    onChange={(value) => setFormData({ ...formData, nisab_silver_price_per_gram: value })}
                   />
                 </div>
               </div>
@@ -407,6 +495,130 @@ export default function Periods() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!viewingPeriod} onOpenChange={(open) => !open && setViewingPeriod(null)}>
+        <DialogContent className="max-w-4xl">
+          {viewingPeriod && (
+            <>
+              <DialogHeader>
+                <div className="rounded-xl border border-border/70 bg-[linear-gradient(135deg,hsl(var(--primary)/0.12),hsl(196_90%_45%/0.08))] p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <DialogTitle className="text-xl font-display">{viewingPeriod.name}</DialogTitle>
+                      <p className="text-sm text-muted-foreground">
+                        {viewingPeriod.hijri_year}H / {viewingPeriod.gregorian_year}M
+                      </p>
+                    </div>
+                    <Badge variant={viewingPeriod.status === "active" ? "default" : "secondary"}>
+                      {viewingPeriod.status === "active" ? "Periode Aktif" : "Periode Arsip"}
+                    </Badge>
+                  </div>
+                </div>
+              </DialogHeader>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <Card className="glass-card">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                      <Wheat className="h-4 w-4 text-primary" />
+                      Beras per Orang
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-xl font-semibold">
+                      {viewingPeriod.rice_amount_per_person ?? 0} kg
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="glass-card">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                      <Coins className="h-4 w-4 text-primary" />
+                      Uang per Orang
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-xl font-semibold">
+                      {formatCurrency(viewingPeriod.cash_amount_per_person ?? 0)}
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="glass-card">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                      <Shield className="h-4 w-4 text-primary" />
+                      Fidyah per Hari
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-xl font-semibold">
+                      {formatCurrency(viewingPeriod.fidyah_daily_rate ?? 0)}
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Card className="glass-card">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Informasi Periode</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-muted-foreground">Tanggal Mulai</span>
+                      <span className="font-medium text-right">{formatDateDisplay(viewingPeriod.start_date)}</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-muted-foreground">Tanggal Selesai</span>
+                      <span className="font-medium text-right">{formatDateDisplay(viewingPeriod.end_date)}</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-muted-foreground">Dibuat</span>
+                      <span className="font-medium text-right">{formatDateDisplay(viewingPeriod.created_at)}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="glass-card">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Nilai Nisab</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-muted-foreground">Harga Emas / gram</span>
+                      <span className="font-medium text-right">
+                        {formatCurrency(viewingPeriod.nisab_gold_price_per_gram ?? 0)}
+                      </span>
+                    </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-muted-foreground">Harga Perak / gram</span>
+                      <span className="font-medium text-right">
+                        {formatCurrency(viewingPeriod.nisab_silver_price_per_gram ?? 0)}
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card className="glass-card">
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                    <CalendarIcon className="h-4 w-4 text-primary" />
+                    Keterangan
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    {viewingPeriod.description?.trim() || "Tidak ada keterangan untuk periode ini."}
+                  </p>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </AppLayout>

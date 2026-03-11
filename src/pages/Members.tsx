@@ -26,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Edit, Eye, Users } from "lucide-react";
+import { Edit, Eye, Trash2, Users, UserCheck, UserX } from "lucide-react";
 
 interface MuzakkiMember {
   id: string;
@@ -47,6 +47,10 @@ interface MuzakkiRow {
   notes: string | null;
   is_active: boolean;
 }
+
+type DeleteResult = {
+  mode: "deleted" | "deactivated";
+};
 
 const RELATIONSHIP_LABELS: Record<string, string> = {
   head_of_family: "Kepala Keluarga",
@@ -185,6 +189,89 @@ export default function Members() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string): Promise<DeleteResult> => {
+      const { data: deletedRows, error } = await supabase
+        .from("muzakki_members")
+        .delete()
+        .eq("id", id)
+        .select("id");
+
+      if (error) {
+        const errorCode = (error as { code?: string } | null)?.code;
+        const shouldFallbackToDeactivate = errorCode === "23503" || errorCode === "42501";
+        if (!shouldFallbackToDeactivate) {
+          throw error;
+        }
+      }
+
+      if ((deletedRows?.length ?? 0) > 0) {
+        return { mode: "deleted" };
+      }
+
+      const { data: deactivatedRows, error: deactivateError } = await supabase
+        .from("muzakki_members")
+        .update({ is_active: false, is_dependent: false })
+        .eq("id", id)
+        .select("id");
+
+      if (deactivateError) throw deactivateError;
+      if ((deactivatedRows?.length ?? 0) === 0) {
+        throw new Error("Data anggota tidak ditemukan atau Anda tidak memiliki izin hapus/nonaktifkan.");
+      }
+
+      return { mode: "deactivated" };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members"] });
+      toast({
+        title:
+          result.mode === "deleted"
+            ? "Anggota berhasil dihapus"
+            : "Anggota tidak bisa dihapus permanen, data dinonaktifkan",
+      });
+    },
+    onError: (error: { message: string; code?: string }) => {
+      const detail = error.code
+        ? `[${error.code}] ${error.message}`
+        : error.message;
+      toast({ variant: "destructive", title: "Gagal menghapus anggota", description: detail });
+    },
+  });
+
+  const toggleStatusMutation = useMutation({
+    mutationFn: async (member: Pick<MuzakkiMember, "id" | "name" | "is_active">) => {
+      const nextActive = !member.is_active;
+      const payload: { is_active: boolean; is_dependent?: boolean } = { is_active: nextActive };
+      if (!nextActive) {
+        payload.is_dependent = false;
+      }
+
+      const { error } = await supabase
+        .from("muzakki_members")
+        .update(payload)
+        .eq("id", member.id);
+      if (error) throw error;
+
+      return { nextActive, name: member.name };
+    },
+    onSuccess: ({ nextActive, name }) => {
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members"] });
+      toast({
+        title: nextActive ? `Anggota "${name}" diaktifkan` : `Anggota "${name}" dinonaktifkan`,
+        description: nextActive
+          ? "Atur status tanggungan jika anggota perlu ikut transaksi."
+          : "Anggota tidak akan muncul pada transaksi zakat fitrah.",
+      });
+    },
+    onError: (error: { message: string; code?: string }) => {
+      const detail = error.code
+        ? `[${error.code}] ${error.message}`
+        : error.message;
+      toast({ variant: "destructive", title: "Gagal mengubah status anggota", description: detail });
+    },
+  });
+
   const resetForm = () => {
     setFormData({
       muzakki_id: muzakkiFilter || "",
@@ -222,6 +309,21 @@ export default function Members() {
 
   const handleViewMuzakki = (member: MuzakkiMember) => {
     router.push(`/muzakki/${member.muzakki_id}`);
+  };
+
+  const handleDelete = (member: MuzakkiMember) => {
+    if (member.source_type !== "member") return;
+    const confirmed = window.confirm(`Hapus anggota "${member.name}"?`);
+    if (!confirmed) return;
+    deleteMutation.mutate(member.id);
+  };
+
+  const handleToggleStatus = (member: MuzakkiMember) => {
+    if (member.source_type !== "member") return;
+    const actionLabel = member.is_active ? "Nonaktifkan" : "Aktifkan";
+    const confirmed = window.confirm(`${actionLabel} anggota "${member.name}"?`);
+    if (!confirmed) return;
+    toggleStatusMutation.mutate(member);
   };
 
   const columns: Column<MuzakkiMember>[] = [
@@ -320,9 +422,28 @@ export default function Members() {
               <Users className="h-4 w-4" />
             </Button>
           ) : !isReadOnly ? (
-            <Button variant="ghost" size="icon" onClick={() => handleEdit(member)}>
-              <Edit className="h-4 w-4" />
-            </Button>
+            <div className="flex gap-1">
+              <Button variant="ghost" size="icon" onClick={() => handleEdit(member)} title="Edit Anggota">
+                <Edit className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => handleToggleStatus(member)}
+                title={member.is_active ? "Nonaktifkan Anggota" : "Aktifkan Anggota"}
+              >
+                {member.is_active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-destructive"
+                onClick={() => handleDelete(member)}
+                title="Hapus Anggota"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
           ) : (
             <Button variant="ghost" size="icon">
               <Eye className="h-4 w-4" />

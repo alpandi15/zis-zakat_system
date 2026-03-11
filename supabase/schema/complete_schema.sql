@@ -255,6 +255,7 @@ CREATE TABLE public.zakat_fitrah_transactions (
   transaction_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   payment_type public.zakat_payment_type NOT NULL DEFAULT 'rice',
   total_members INTEGER NOT NULL DEFAULT 0,
+  is_custom_total_rice BOOLEAN NOT NULL DEFAULT false,
   rice_amount_kg NUMERIC,
   money_amount NUMERIC,
   rice_price_per_kg NUMERIC,
@@ -919,6 +920,10 @@ CREATE POLICY "Admins and Zakat Officers can update muzakki"
   ON public.muzakki FOR UPDATE
   USING (public.has_any_role(auth.uid(), ARRAY['super_admin', 'chairman', 'zakat_officer']::public.app_role[]));
 
+CREATE POLICY "Admins and Zakat Officers can delete muzakki"
+  ON public.muzakki FOR DELETE
+  USING (public.has_any_role(auth.uid(), ARRAY['super_admin', 'chairman', 'zakat_officer']::public.app_role[]));
+
 -- =====================================================
 -- SECTION 15: RLS POLICIES - MUZAKKI MEMBERS (HARDENED)
 -- =====================================================
@@ -934,6 +939,10 @@ CREATE POLICY "Admins and Zakat Officers can create muzakki members"
 
 CREATE POLICY "Admins and Zakat Officers can update muzakki members"
   ON public.muzakki_members FOR UPDATE
+  USING (public.has_any_role(auth.uid(), ARRAY['super_admin', 'chairman', 'zakat_officer']::public.app_role[]));
+
+CREATE POLICY "Admins and Zakat Officers can delete muzakki members"
+  ON public.muzakki_members FOR DELETE
   USING (public.has_any_role(auth.uid(), ARRAY['super_admin', 'chairman', 'zakat_officer']::public.app_role[]));
 
 -- =====================================================

@@ -756,6 +756,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           id: string
+          is_custom_total_rice: boolean
           money_amount: number | null
           muzakki_id: string
           notes: string | null
@@ -771,6 +772,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          is_custom_total_rice?: boolean
           money_amount?: number | null
           muzakki_id: string
           notes?: string | null
@@ -786,6 +788,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          is_custom_total_rice?: boolean
           money_amount?: number | null
           muzakki_id?: string
           notes?: string | null

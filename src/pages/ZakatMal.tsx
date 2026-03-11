@@ -467,12 +467,11 @@ export default function ZakatMal() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <Label className="text-sm">Harga Emas/gram:</Label>
-                    <span className="text-sm">Rp</span>
-                    <Input
-                      type="number"
+                    <CurrencyInput
+                      id="customGoldPrice"
                       value={customGoldPrice}
-                      onChange={(e) => setCustomGoldPrice(Number(e.target.value))}
-                      className="w-40 border-amber-500"
+                      onChange={setCustomGoldPrice}
+                      className="w-44 border-amber-500"
                     />
                     <Badge variant="outline" className="text-amber-600 border-amber-500">Custom</Badge>
                   </div>
@@ -538,13 +537,11 @@ export default function ZakatMal() {
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="manualAmount">Jumlah Zakat Manual (Rp)</Label>
-                    <Input
+                    <CurrencyInput
                       id="manualAmount"
-                      type="number"
-                      value={manualAmount || ""}
-                      onChange={(e) => setManualAmount(Number(e.target.value))}
+                      value={manualAmount}
+                      onChange={setManualAmount}
                       placeholder="0"
-                      min={0}
                     />
                   </div>
                   <div className="space-y-2">

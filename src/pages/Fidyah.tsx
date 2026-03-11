@@ -4,6 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
 import { CurrencyInput } from "@/components/shared/CurrencyInput";
+import {
+  MuzakkiMemberSearchSelect,
+  type MuzakkiMemberOption,
+} from "@/components/shared/MuzakkiMemberSearchSelect";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -84,11 +88,6 @@ interface Transaction {
   payer_member?: { name: string; relationship: MemberRelationship } | null;
 }
 
-interface ExistingMember {
-  id: string;
-  muzakki_id: string;
-}
-
 export default function FidyahPage() {
   const { isReadOnly, selectedPeriod } = usePeriod();
   const { toast } = useToast();
@@ -98,10 +97,10 @@ export default function FidyahPage() {
   const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
 
   // Form state
-  const [payerName, setPayerName] = useState("");
+  const [payerMemberId, setPayerMemberId] = useState("");
+  const [selectedPayerMember, setSelectedPayerMember] = useState<MuzakkiMemberOption | null>(null);
   const [payerPhone, setPayerPhone] = useState("");
   const [payerAddress, setPayerAddress] = useState("");
-  const [newMemberRelationship, setNewMemberRelationship] = useState<MemberRelationship>("head_of_family");
   const [reason, setReason] = useState<FidyahReason>("elderly");
   const [reasonNotes, setReasonNotes] = useState("");
   const [missedDays, setMissedDays] = useState(1);
@@ -141,64 +140,13 @@ export default function FidyahPage() {
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!selectedPeriod?.id) throw new Error("Periode tidak dipilih");
-      const cleanName = payerName.trim();
-      if (!cleanName) throw new Error("Nama pembayar harus diisi");
+      if (!payerMemberId || !selectedPayerMember) throw new Error("Pilih anggota pembayar");
       if (missedDays <= 0) throw new Error("Jumlah hari harus lebih dari 0");
 
       const dailyRate = paymentType === "cash" ? dailyRateCash : dailyRateFood;
       const totalAmount = paymentType === "cash" ? totalCash : totalFood;
-
-      let payerMemberId: string | null = null;
-      let payerMuzakkiId: string | null = null;
-
-      // 1) Try finding existing active member with exact name (case-insensitive)
-      const { data: existingMembers, error: findError } = await supabase
-        .from("muzakki_members")
-        .select("id, muzakki_id")
-        .eq("is_active", true)
-        .ilike("name", cleanName)
-        .order("created_at", { ascending: true })
-        .limit(1);
-
-      if (findError) throw findError;
-
-      const existingMember = (existingMembers?.[0] ?? null) as ExistingMember | null;
-
-      if (existingMember) {
-        payerMemberId = existingMember.id;
-        payerMuzakkiId = existingMember.muzakki_id;
-      } else {
-        // 2) Auto-create household + member if member does not exist
-        const { data: newMuzakki, error: muzakkiError } = await supabase
-          .from("muzakki")
-          .insert({
-            name: cleanName,
-            phone: payerPhone || null,
-            address: payerAddress || null,
-            notes: "Auto-created from Fidyah transaction",
-          })
-          .select("id")
-          .single();
-
-        if (muzakkiError) throw muzakkiError;
-
-        const { data: newMember, error: memberError } = await supabase
-          .from("muzakki_members")
-          .insert({
-            muzakki_id: newMuzakki.id,
-            name: cleanName,
-            relationship: newMemberRelationship,
-            is_dependent: true,
-            notes: "Auto-created from Fidyah transaction",
-          })
-          .select("id, muzakki_id")
-          .single();
-
-        if (memberError) throw memberError;
-
-        payerMemberId = newMember.id;
-        payerMuzakkiId = newMember.muzakki_id;
-      }
+      const cleanName = selectedPayerMember.name.trim();
+      const payerMuzakkiId = selectedPayerMember.muzakki_id;
 
       // Create transaction
       const { data: transaction, error: txError } = await supabase
@@ -262,10 +210,10 @@ export default function FidyahPage() {
   });
 
   const resetForm = () => {
-    setPayerName("");
+    setPayerMemberId("");
+    setSelectedPayerMember(null);
     setPayerPhone("");
     setPayerAddress("");
-    setNewMemberRelationship("head_of_family");
     setReason("elderly");
     setReasonNotes("");
     setMissedDays(1);
@@ -366,15 +314,18 @@ export default function FidyahPage() {
               <h3 className="font-medium">Data Pembayar</h3>
               <div className="space-y-2">
                 <Label htmlFor="payerName">Nama Anggota Pembayar *</Label>
-                <Input
-                  id="payerName"
-                  value={payerName}
-                  onChange={(e) => setPayerName(e.target.value)}
-                  placeholder="Contoh: Ahmad"
-                  required
+                <MuzakkiMemberSearchSelect
+                  value={payerMemberId}
+                  onChange={(value, selected) => {
+                    setPayerMemberId(value);
+                    setSelectedPayerMember(selected);
+                    setPayerPhone(selected?.muzakki?.phone || "");
+                    setPayerAddress(selected?.muzakki?.address || "");
+                  }}
+                  placeholder="Cari anggota atau tambah muzakki baru..."
                 />
                 <p className="text-xs text-muted-foreground">
-                  Sistem akan mencari nama anggota yang sudah ada. Jika belum ada, data muzakki + anggota dibuat otomatis.
+                  Pencarian langsung ke tabel anggota (`muzakki_members`). Jika belum ada, gunakan menu tambah muzakki baru.
                 </p>
               </div>
 
@@ -388,23 +339,14 @@ export default function FidyahPage() {
                     placeholder="08xxxxxxxxxx"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Hubungan (jika data baru)</Label>
-                  <Select
-                    value={newMemberRelationship}
-                    onValueChange={(value) => setNewMemberRelationship(value as MemberRelationship)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="head_of_family">Kepala Keluarga</SelectItem>
-                      <SelectItem value="wife">Istri</SelectItem>
-                      <SelectItem value="child">Anak</SelectItem>
-                      <SelectItem value="parent">Orang Tua</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                {selectedPayerMember && (
+                  <div className="space-y-2">
+                    <Label>Hubungan Anggota</Label>
+                    <div className="h-10 rounded-md border px-3 flex items-center text-sm bg-muted/30">
+                      {RELATIONSHIP_LABELS[selectedPayerMember.relationship]}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
