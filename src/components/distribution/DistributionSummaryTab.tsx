@@ -1,0 +1,536 @@
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Eye, FileText, CheckCircle2, Clock, XCircle, UserCheck } from "lucide-react";
+import { formatCurrency } from "@/lib/formatCurrency";
+import { format } from "date-fns";
+import { id as idLocale } from "date-fns/locale";
+import { useAsnafSettings } from "@/hooks/useAsnafSettings";
+
+interface DistributionSummaryTabProps {
+  periodId: string;
+}
+
+interface MustahikSummary {
+  id: string;
+  name: string;
+  asnaf: string;
+  totalRice: number;
+  totalCash: number;
+  fidyahFood: number;
+  deliveryStatus: string | null;
+  deliveryNotes: string | null;
+  deliveredAt: string | null;
+  assigneeName: string | null;
+  breakdown: {
+    zakatFitrahRice: number;
+    zakatFitrahCash: number;
+    zakatMal: number;
+    fidyahCash: number;
+    fidyahFood: number;
+  };
+}
+
+const DELIVERY_STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ReactNode }> = {
+  pending: { label: "Belum Dikirim", variant: "secondary", icon: <Clock className="h-3 w-3" /> },
+  delivered: { label: "Terkirim", variant: "default", icon: <CheckCircle2 className="h-3 w-3" /> },
+  not_delivered: { label: "Tidak Terkirim", variant: "destructive", icon: <XCircle className="h-3 w-3" /> },
+};
+
+export function DistributionSummaryTab({ periodId }: DistributionSummaryTabProps) {
+  const [selectedMustahik, setSelectedMustahik] = useState<MustahikSummary | null>(null);
+  const { getLabel } = useAsnafSettings();
+
+  // Fetch distribution assignments (source of truth for delivery status)
+  const { data: assignments = [] } = useQuery({
+    queryKey: ["distribution-assignments-summary", periodId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("distribution_assignments")
+        .select("mustahik_id, assigned_to, status, delivery_notes, delivered_at, assigned_at")
+        .eq("period_id", periodId);
+      if (error) throw error;
+      
+      // Fetch assignee profiles
+      const userIds = [...new Set(data.map(a => a.assigned_to))];
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", userIds);
+      
+      const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
+      
+      return data.map(a => ({
+        ...a,
+        assignee: profileMap.get(a.assigned_to),
+      }));
+    },
+    enabled: !!periodId,
+  });
+
+  // Fetch zakat distributions
+  const { data: zakatDist = [] } = useQuery({
+    queryKey: ["zakat_distributions", periodId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("zakat_distributions")
+        .select("mustahik_id, fund_category, cash_amount, rice_amount_kg, status")
+        .eq("period_id", periodId)
+        .in("status", ["distributed", "approved"]);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!periodId,
+  });
+
+  // Fetch fidyah distributions
+  const { data: fidyahDist = [] } = useQuery({
+    queryKey: ["fidyah_distributions", periodId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("fidyah_distributions")
+        .select("mustahik_id, fund_category, cash_amount, food_amount_kg, status")
+        .eq("period_id", periodId)
+        .in("status", ["distributed", "approved"]);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!periodId,
+  });
+
+  // Fetch mustahik data
+  const { data: mustahikList = [] } = useQuery({
+    queryKey: ["mustahik-all"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("mustahik")
+        .select("id, name, asnaf")
+        .order("name");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Create assignment map
+  const assignmentMap = useMemo(() => {
+    const map = new Map<string, typeof assignments[0]>();
+    assignments.forEach(a => map.set(a.mustahik_id, a));
+    return map;
+  }, [assignments]);
+
+  // Calculate summary per mustahik with delivery status
+  const summaryData = useMemo(() => {
+    const summaryMap = new Map<string, MustahikSummary>();
+
+    // Initialize with mustahik data
+    mustahikList.forEach(m => {
+      const assignment = assignmentMap.get(m.id);
+      summaryMap.set(m.id, {
+        id: m.id,
+        name: m.name,
+        asnaf: m.asnaf,
+        totalRice: 0,
+        totalCash: 0,
+        fidyahFood: 0,
+        deliveryStatus: assignment?.status || null,
+        deliveryNotes: assignment?.delivery_notes || null,
+        deliveredAt: assignment?.delivered_at || null,
+        assigneeName: assignment?.assignee?.full_name || assignment?.assignee?.email || null,
+        breakdown: {
+          zakatFitrahRice: 0,
+          zakatFitrahCash: 0,
+          zakatMal: 0,
+          fidyahCash: 0,
+          fidyahFood: 0,
+        },
+      });
+    });
+
+    // Process zakat distributions
+    zakatDist.forEach(d => {
+      const summary = summaryMap.get(d.mustahik_id);
+      if (!summary) return;
+
+      const cash = d.cash_amount || 0;
+      const rice = d.rice_amount_kg || 0;
+
+      summary.totalCash += cash;
+      summary.totalRice += rice;
+
+      switch (d.fund_category) {
+        case "zakat_fitrah_rice":
+          summary.breakdown.zakatFitrahRice += rice;
+          break;
+        case "zakat_fitrah_cash":
+          summary.breakdown.zakatFitrahCash += cash;
+          break;
+        case "zakat_mal":
+          summary.breakdown.zakatMal += cash;
+          break;
+      }
+    });
+
+    // Process fidyah distributions
+    fidyahDist.forEach(d => {
+      const summary = summaryMap.get(d.mustahik_id);
+      if (!summary) return;
+
+      const cash = d.cash_amount || 0;
+      const food = d.food_amount_kg || 0;
+
+      summary.totalCash += cash;
+      summary.fidyahFood += food;
+      
+      switch (d.fund_category) {
+        case "fidyah_cash":
+          summary.breakdown.fidyahCash += cash;
+          break;
+        case "fidyah_food":
+          summary.breakdown.fidyahFood += food;
+          break;
+      }
+    });
+
+    // Filter only mustahik with distributions and sort by delivery status then total
+    return Array.from(summaryMap.values())
+      .filter(s => s.totalCash > 0 || s.totalRice > 0 || s.fidyahFood > 0)
+      .sort((a, b) => {
+        // Sort by delivery status: pending first, then delivered, then not_delivered
+        const statusOrder: Record<string, number> = { pending: 0, delivered: 1, not_delivered: 2 };
+        const aOrder = a.deliveryStatus ? statusOrder[a.deliveryStatus] ?? 3 : 3;
+        const bOrder = b.deliveryStatus ? statusOrder[b.deliveryStatus] ?? 3 : 3;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return (b.totalCash + b.totalRice * 15000) - (a.totalCash + a.totalRice * 15000);
+      });
+  }, [mustahikList, zakatDist, fidyahDist, assignmentMap]);
+
+  // Calculate totals
+  const totals = useMemo(() => {
+    return summaryData.reduce(
+      (acc, s) => ({
+        totalCash: acc.totalCash + s.totalCash,
+        totalRice: acc.totalRice + s.totalRice,
+        zakatFitrahRice: acc.zakatFitrahRice + s.breakdown.zakatFitrahRice,
+        zakatFitrahCash: acc.zakatFitrahCash + s.breakdown.zakatFitrahCash,
+        zakatMal: acc.zakatMal + s.breakdown.zakatMal,
+        fidyahCash: acc.fidyahCash + s.breakdown.fidyahCash,
+        fidyahFood: acc.fidyahFood + s.breakdown.fidyahFood,
+      }),
+      { totalCash: 0, totalRice: 0, zakatFitrahRice: 0, zakatFitrahCash: 0, zakatMal: 0, fidyahCash: 0, fidyahFood: 0 }
+    );
+  }, [summaryData]);
+
+  // Delivery stats
+  const deliveryStats = useMemo(() => {
+    return {
+      total: summaryData.length,
+      delivered: summaryData.filter(s => s.deliveryStatus === "delivered").length,
+      pending: summaryData.filter(s => s.deliveryStatus === "pending").length,
+      notDelivered: summaryData.filter(s => s.deliveryStatus === "not_delivered").length,
+      unassigned: summaryData.filter(s => !s.deliveryStatus).length,
+    };
+  }, [summaryData]);
+
+  return (
+    <div className="space-y-4">
+      {/* Summary Cards */}
+      <div className="grid gap-4 md:grid-cols-5">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Total Penerima</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{deliveryStats.total}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3 text-green-600" />
+              Terkirim
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-green-600">{deliveryStats.delivered}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground flex items-center gap-1">
+              <Clock className="h-3 w-3 text-yellow-600" />
+              Belum Dikirim
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-yellow-600">{deliveryStats.pending}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground flex items-center gap-1">
+              <XCircle className="h-3 w-3 text-red-600" />
+              Tidak Terkirim
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-red-600">{deliveryStats.notDelivered}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Belum Ditugaskan</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-muted-foreground">{deliveryStats.unassigned}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Fund Totals */}
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Total Beras</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xl font-bold">{totals.totalRice.toFixed(2)} kg</p>
+            <p className="text-xs text-muted-foreground">Zakat Fitrah</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Total Uang</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xl font-bold">{formatCurrency(totals.totalCash)}</p>
+            <p className="text-xs text-muted-foreground">Semua sumber</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Total Makanan Fidyah</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xl font-bold">{totals.fidyahFood.toFixed(2)} kg</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Zakat Mal</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xl font-bold">{formatCurrency(totals.zakatMal)}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Per-Mustahik Table with Delivery Status */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Riwayat Distribusi
+          </CardTitle>
+          <CardDescription>
+            Status pengiriman dari distribution_assignments sebagai sumber tunggal kebenaran.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {summaryData.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">
+              Belum ada distribusi untuk periode ini
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nama</TableHead>
+                  <TableHead>Asnaf</TableHead>
+                  <TableHead className="text-right">Total Beras</TableHead>
+                  <TableHead className="text-right">Total Uang</TableHead>
+                  <TableHead>Status Pengiriman</TableHead>
+                  <TableHead>Petugas</TableHead>
+                  <TableHead>Waktu Kirim</TableHead>
+                  <TableHead className="text-right">Aksi</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {summaryData.map(s => (
+                  <TableRow key={s.id}>
+                    <TableCell className="font-medium">{s.name}</TableCell>
+                    <TableCell>
+                      <Badge variant={s.asnaf === "amil" ? "default" : "outline"}>
+                        {getLabel(s.asnaf)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {s.totalRice > 0 ? `${s.totalRice.toFixed(2)} kg` : "-"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {s.totalCash > 0 ? formatCurrency(s.totalCash) : "-"}
+                    </TableCell>
+                    <TableCell>
+                      {s.deliveryStatus ? (
+                        <Badge 
+                          variant={DELIVERY_STATUS_CONFIG[s.deliveryStatus]?.variant || "secondary"}
+                          className="flex items-center gap-1 w-fit"
+                        >
+                          {DELIVERY_STATUS_CONFIG[s.deliveryStatus]?.icon}
+                          {DELIVERY_STATUS_CONFIG[s.deliveryStatus]?.label || s.deliveryStatus}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline">Belum Ditugaskan</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {s.assigneeName ? (
+                        <span className="flex items-center gap-1 text-sm">
+                          <UserCheck className="h-3 w-3" />
+                          {s.assigneeName}
+                        </span>
+                      ) : "-"}
+                    </TableCell>
+                    <TableCell>
+                      {s.deliveredAt 
+                        ? format(new Date(s.deliveredAt), "dd MMM yyyy HH:mm", { locale: idLocale })
+                        : "-"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setSelectedMustahik(s)}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Detail Dialog */}
+      <Dialog open={!!selectedMustahik} onOpenChange={() => setSelectedMustahik(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Rincian Distribusi - {selectedMustahik?.name}</DialogTitle>
+          </DialogHeader>
+          {selectedMustahik && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Badge variant={selectedMustahik.asnaf === "amil" ? "default" : "outline"}>
+                  {getLabel(selectedMustahik.asnaf)}
+                </Badge>
+                {selectedMustahik.deliveryStatus && (
+                  <Badge 
+                    variant={DELIVERY_STATUS_CONFIG[selectedMustahik.deliveryStatus]?.variant || "secondary"}
+                    className="flex items-center gap-1"
+                  >
+                    {DELIVERY_STATUS_CONFIG[selectedMustahik.deliveryStatus]?.icon}
+                    {DELIVERY_STATUS_CONFIG[selectedMustahik.deliveryStatus]?.label}
+                  </Badge>
+                )}
+              </div>
+
+              {/* Delivery Info */}
+              {selectedMustahik.deliveryStatus && (
+                <div className="p-3 bg-muted/50 rounded-lg space-y-2">
+                  <h4 className="font-medium text-sm">Info Pengiriman</h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <p className="text-muted-foreground text-xs">Petugas</p>
+                      <p className="font-medium">{selectedMustahik.assigneeName || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Waktu Kirim</p>
+                      <p className="font-medium">
+                        {selectedMustahik.deliveredAt 
+                          ? format(new Date(selectedMustahik.deliveredAt), "dd MMM yyyy HH:mm", { locale: idLocale })
+                          : "-"}
+                      </p>
+                    </div>
+                    {selectedMustahik.deliveryNotes && (
+                      <div className="col-span-2">
+                        <p className="text-muted-foreground text-xs">Catatan Pengiriman</p>
+                        <p>{selectedMustahik.deliveryNotes}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm">Sumber Zakat</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <p className="text-muted-foreground text-xs">Zakat Fitrah (Beras)</p>
+                    <p className="font-bold">{selectedMustahik.breakdown.zakatFitrahRice.toFixed(2)} kg</p>
+                  </div>
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <p className="text-muted-foreground text-xs">Zakat Fitrah (Uang)</p>
+                    <p className="font-bold">{formatCurrency(selectedMustahik.breakdown.zakatFitrahCash)}</p>
+                  </div>
+                  <div className="p-3 bg-muted/50 rounded-lg col-span-2">
+                    <p className="text-muted-foreground text-xs">Zakat Mal</p>
+                    <p className="font-bold">{formatCurrency(selectedMustahik.breakdown.zakatMal)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm">Sumber Fidyah</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <p className="text-muted-foreground text-xs">Fidyah (Uang)</p>
+                    <p className="font-bold">{formatCurrency(selectedMustahik.breakdown.fidyahCash)}</p>
+                  </div>
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <p className="text-muted-foreground text-xs">Fidyah (Makanan)</p>
+                    <p className="font-bold">{selectedMustahik.breakdown.fidyahFood.toFixed(2)} kg</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t pt-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <p className="text-muted-foreground text-sm">Total Beras</p>
+                    <p className="text-lg font-bold">{selectedMustahik.totalRice.toFixed(2)} kg</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-sm">Total Uang</p>
+                    <p className="text-lg font-bold">{formatCurrency(selectedMustahik.totalCash)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-sm">Fidyah Makanan</p>
+                    <p className="text-lg font-bold">{selectedMustahik.fidyahFood.toFixed(2)} kg</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

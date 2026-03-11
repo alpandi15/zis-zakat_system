@@ -1,0 +1,530 @@
+import { useState } from "react";
+import { useRouter } from "next/router";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
+import { usePeriod } from "@/contexts/PeriodContext";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { useToast } from "@/hooks/use-toast";
+import { ArrowLeft, Edit, Plus, UserCheck, UserX, History } from "lucide-react";
+import { format } from "date-fns";
+import { id as idLocale } from "date-fns/locale";
+
+interface MuzakkiMember {
+  id: string;
+  muzakki_id: string;
+  name: string;
+  relationship: string;
+  birth_date: string | null;
+  notes: string | null;
+  is_active: boolean;
+}
+
+interface ZakatFitrahItem {
+  id: string;
+  period_id: string;
+  money_amount: number | null;
+  rice_amount_kg: number | null;
+  created_at: string;
+  transaction: {
+    transaction_date: string;
+    payment_type: string;
+  };
+  period: {
+    name: string;
+    hijri_year: number;
+  };
+}
+
+const RELATIONSHIP_LABELS: Record<string, string> = {
+  head_of_family: "Kepala Keluarga",
+  wife: "Istri",
+  child: "Anak",
+  parent: "Orang Tua",
+};
+
+export default function MuzakkiDetail() {
+  const router = useRouter();
+  const muzakkiId = typeof router.query.id === "string" ? router.query.id : undefined;
+  const { toast } = useToast();
+  const { isReadOnly, selectedPeriod } = usePeriod();
+  const queryClient = useQueryClient();
+
+  const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
+  const [editingMember, setEditingMember] = useState<MuzakkiMember | null>(null);
+  const [historyMember, setHistoryMember] = useState<MuzakkiMember | null>(null);
+  const [memberForm, setMemberForm] = useState({
+    name: "",
+    relationship: "child" as string,
+    birth_date: "",
+    notes: "",
+  });
+
+  // Fetch Muzakki details
+  const { data: muzakki, isLoading: isLoadingMuzakki } = useQuery({
+    queryKey: ["muzakki", muzakkiId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("muzakki")
+        .select("*")
+        .eq("id", muzakkiId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!muzakkiId,
+  });
+
+  // Fetch members
+  const { data: members = [], isLoading: isLoadingMembers } = useQuery({
+    queryKey: ["muzakki-members", muzakkiId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("muzakki_members")
+        .select("*")
+        .eq("muzakki_id", muzakkiId)
+        .order("relationship")
+        .order("name");
+      if (error) throw error;
+      return data as MuzakkiMember[];
+    },
+    enabled: !!muzakkiId,
+  });
+
+  // Fetch zakat history for a member
+  const { data: zakatHistory = [], isLoading: isLoadingHistory } = useQuery({
+    queryKey: ["member-zakat-history", historyMember?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("zakat_fitrah_transaction_items")
+        .select(`
+          id,
+          period_id,
+          money_amount,
+          rice_amount_kg,
+          created_at,
+          transaction:transaction_id(transaction_date, payment_type),
+          period:period_id(name, hijri_year)
+        `)
+        .eq("muzakki_member_id", historyMember?.id)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data as unknown as ZakatFitrahItem[];
+    },
+    enabled: !!historyMember?.id,
+  });
+
+  // Create member mutation
+  const createMemberMutation = useMutation({
+    mutationFn: async (data: typeof memberForm) => {
+      const { error } = await supabase.from("muzakki_members").insert({
+        muzakki_id: muzakkiId,
+        name: data.name,
+        relationship: data.relationship as "head_of_family" | "wife" | "child" | "parent",
+        birth_date: data.birth_date || null,
+        notes: data.notes || null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members", muzakkiId] });
+      setIsAddMemberOpen(false);
+      resetMemberForm();
+      toast({ title: "Anggota berhasil ditambahkan" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Gagal", description: error.message });
+    },
+  });
+
+  // Update member mutation
+  const updateMemberMutation = useMutation({
+    mutationFn: async (data: { id: string } & typeof memberForm & { is_active?: boolean }) => {
+      const { error } = await supabase
+        .from("muzakki_members")
+        .update({
+          name: data.name,
+          relationship: data.relationship as "head_of_family" | "wife" | "child" | "parent",
+          birth_date: data.birth_date || null,
+          notes: data.notes || null,
+          ...(data.is_active !== undefined && { is_active: data.is_active }),
+        })
+        .eq("id", data.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["muzakki-members", muzakkiId] });
+      setEditingMember(null);
+      resetMemberForm();
+      toast({ title: "Anggota berhasil diperbarui" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Gagal", description: error.message });
+    },
+  });
+
+  // Toggle member active status
+  const toggleMemberStatus = (member: MuzakkiMember) => {
+    updateMemberMutation.mutate({
+      id: member.id,
+      name: member.name,
+      relationship: member.relationship,
+      birth_date: member.birth_date || "",
+      notes: member.notes || "",
+      is_active: !member.is_active,
+    });
+  };
+
+  const resetMemberForm = () => {
+    setMemberForm({ name: "", relationship: "child", birth_date: "", notes: "" });
+  };
+
+  const handleEditMember = (member: MuzakkiMember) => {
+    setEditingMember(member);
+    setMemberForm({
+      name: member.name,
+      relationship: member.relationship,
+      birth_date: member.birth_date || "",
+      notes: member.notes || "",
+    });
+  };
+
+  const handleSubmitMember = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingMember) {
+      updateMemberMutation.mutate({ id: editingMember.id, ...memberForm });
+    } else {
+      createMemberMutation.mutate(memberForm);
+    }
+  };
+
+  if (isLoadingMuzakki) {
+    return (
+      <AppLayout title="Detail Muzakki">
+        <div className="flex items-center justify-center h-64">
+          <p className="text-muted-foreground">Memuat...</p>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (!muzakki) {
+    return (
+      <AppLayout title="Detail Muzakki">
+        <div className="flex flex-col items-center justify-center h-64 gap-4">
+          <p className="text-muted-foreground">Muzakki tidak ditemukan</p>
+          <Button onClick={() => router.push("/muzakki")}>Kembali ke Daftar</Button>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  return (
+    <AppLayout title={`Detail: ${muzakki.name}`}>
+      {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
+
+      <div className="space-y-6">
+        {/* Back button */}
+        <Button variant="ghost" onClick={() => router.push("/muzakki")} className="gap-2">
+          <ArrowLeft className="h-4 w-4" />
+          Kembali ke Daftar Muzakki
+        </Button>
+
+        {/* Muzakki Info Card */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>Informasi Muzakki</span>
+              <Badge variant={muzakki.is_active ? "default" : "secondary"}>
+                {muzakki.is_active ? "Aktif" : "Nonaktif"}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <p className="text-sm text-muted-foreground">Nama</p>
+                <p className="font-medium">{muzakki.name}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">No. Telepon</p>
+                <p className="font-medium">{muzakki.phone || "-"}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Email</p>
+                <p className="font-medium">{muzakki.email || "-"}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Alamat</p>
+                <p className="font-medium">{muzakki.address || "-"}</p>
+              </div>
+              {muzakki.notes && (
+                <div className="md:col-span-2">
+                  <p className="text-sm text-muted-foreground">Catatan</p>
+                  <p className="font-medium">{muzakki.notes}</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Members Card */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>Anggota Keluarga ({members.length})</span>
+              {!isReadOnly && (
+                <Button size="sm" onClick={() => setIsAddMemberOpen(true)} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Tambah Anggota
+                </Button>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoadingMembers ? (
+              <p className="text-muted-foreground">Memuat anggota...</p>
+            ) : members.length === 0 ? (
+              <p className="text-muted-foreground text-center py-8">
+                Belum ada anggota keluarga
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nama</TableHead>
+                    <TableHead>Hubungan</TableHead>
+                    <TableHead>Tanggal Lahir</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Aksi</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {members.map((member) => (
+                    <TableRow key={member.id} className={!member.is_active ? "opacity-50" : ""}>
+                      <TableCell className="font-medium">{member.name}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {RELATIONSHIP_LABELS[member.relationship] || member.relationship}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {member.birth_date
+                          ? format(new Date(member.birth_date), "dd MMM yyyy", { locale: idLocale })
+                          : "-"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={member.is_active ? "default" : "secondary"}>
+                          {member.is_active ? "Aktif" : "Nonaktif"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setHistoryMember(member)}
+                            title="Lihat Riwayat Zakat"
+                          >
+                            <History className="h-4 w-4" />
+                          </Button>
+                          {!isReadOnly && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleEditMember(member)}
+                                title="Edit"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => toggleMemberStatus(member)}
+                                title={member.is_active ? "Nonaktifkan" : "Aktifkan"}
+                              >
+                                {member.is_active ? (
+                                  <UserX className="h-4 w-4" />
+                                ) : (
+                                  <UserCheck className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Add/Edit Member Dialog */}
+      <Dialog
+        open={isAddMemberOpen || !!editingMember}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsAddMemberOpen(false);
+            setEditingMember(null);
+            resetMemberForm();
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editingMember ? "Edit Anggota" : "Tambah Anggota Baru"}
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmitMember} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="member_name">Nama *</Label>
+              <Input
+                id="member_name"
+                value={memberForm.name}
+                onChange={(e) => setMemberForm({ ...memberForm, name: e.target.value })}
+                placeholder="Nama anggota keluarga"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="relationship">Hubungan *</Label>
+              <Select
+                value={memberForm.relationship}
+                onValueChange={(value) => setMemberForm({ ...memberForm, relationship: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="head_of_family">Kepala Keluarga</SelectItem>
+                  <SelectItem value="wife">Istri</SelectItem>
+                  <SelectItem value="child">Anak</SelectItem>
+                  <SelectItem value="parent">Orang Tua</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="birth_date">Tanggal Lahir</Label>
+              <Input
+                id="birth_date"
+                type="date"
+                value={memberForm.birth_date}
+                onChange={(e) => setMemberForm({ ...memberForm, birth_date: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="member_notes">Catatan</Label>
+              <Textarea
+                id="member_notes"
+                value={memberForm.notes}
+                onChange={(e) => setMemberForm({ ...memberForm, notes: e.target.value })}
+                placeholder="Catatan tambahan"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsAddMemberOpen(false);
+                  setEditingMember(null);
+                  resetMemberForm();
+                }}
+              >
+                Batal
+              </Button>
+              <Button
+                type="submit"
+                disabled={createMemberMutation.isPending || updateMemberMutation.isPending}
+              >
+                {editingMember ? "Simpan" : "Tambah"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Zakat History Dialog */}
+      <Dialog open={!!historyMember} onOpenChange={(open) => !open && setHistoryMember(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Riwayat Zakat: {historyMember?.name}</DialogTitle>
+          </DialogHeader>
+          {isLoadingHistory ? (
+            <p className="text-muted-foreground text-center py-4">Memuat riwayat...</p>
+          ) : zakatHistory.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">
+              Belum ada riwayat pembayaran zakat
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Periode</TableHead>
+                  <TableHead>Tanggal</TableHead>
+                  <TableHead>Jenis</TableHead>
+                  <TableHead className="text-right">Jumlah</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {zakatHistory.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>{item.period?.name || "-"}</TableCell>
+                    <TableCell>
+                      {item.transaction?.transaction_date
+                        ? format(new Date(item.transaction.transaction_date), "dd MMM yyyy", { locale: idLocale })
+                        : "-"}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {item.transaction?.payment_type === "money" ? "Uang" : "Beras"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {item.transaction?.payment_type === "money"
+                        ? `Rp ${item.money_amount?.toLocaleString("id-ID") || 0}`
+                        : `${item.rice_amount_kg || 0} kg`}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </DialogContent>
+      </Dialog>
+    </AppLayout>
+  );
+}
