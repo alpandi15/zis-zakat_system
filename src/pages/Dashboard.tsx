@@ -85,7 +85,7 @@ export default function Dashboard() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-muted-foreground">
-              Ringkasan data zakat dan fidyah
+              Ringkasan penerimaan dan pendistribusian zakat/fidyah
             </p>
           </div>
           <PeriodSelector
@@ -157,7 +157,7 @@ export default function Dashboard() {
         <div>
           <h2 className="mb-3 text-lg font-semibold flex items-center gap-2">
             <TrendingUp className="h-5 w-5 text-green-600" />
-            Pengumpulan Dana
+            Penerimaan Dana
           </h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <StatCard
@@ -238,10 +238,8 @@ export default function Dashboard() {
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-purple-700">Total Distribusi</p>
-                  <p className="text-2xl font-bold text-purple-800">
-                    {summary?.total_distributions || 0} penerima
-                  </p>
+                  <p className="text-sm text-purple-700">Total Pendistribusian</p>
+                  <p className="text-2xl font-bold text-purple-800">{summary?.total_distributions || 0} penerima</p>
                 </div>
                 <ArrowDownCircle className="h-10 w-10 text-purple-600 opacity-50" />
               </div>

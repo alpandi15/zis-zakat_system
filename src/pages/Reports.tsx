@@ -21,7 +21,7 @@ export default function Reports() {
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground mb-4">
-              Export laporan ringkasan periode dalam format PDF atau Excel.
+              Export laporan ringkasan penerimaan dan pendistribusian periode dalam format PDF atau Excel.
             </p>
           </CardContent>
         </Card>

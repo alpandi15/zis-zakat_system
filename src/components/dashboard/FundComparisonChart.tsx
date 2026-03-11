@@ -45,7 +45,7 @@ export function FundComparisonChart({
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Perbandingan Zakat vs Fidyah</CardTitle>
+          <CardTitle className="text-lg">Perbandingan Penerimaan Zakat vs Fidyah</CardTitle>
         </CardHeader>
         <CardContent className="h-[300px] flex items-center justify-center">
           <p className="text-muted-foreground">Memuat data...</p>
@@ -112,7 +112,7 @@ export function FundComparisonChart({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Distribusi Zakat vs Fidyah</CardTitle>
+          <CardTitle className="text-lg">Komposisi Penerimaan Zakat vs Fidyah</CardTitle>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={280}>

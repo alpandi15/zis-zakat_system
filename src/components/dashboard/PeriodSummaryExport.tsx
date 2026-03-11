@@ -28,7 +28,7 @@ export function PeriodSummaryExport({ summary }: PeriodSummaryExportProps) {
           { category: "Fidyah (Makanan)", value: formatWeight(summary.fidyah_food_kg) },
           { category: "Total Muzakki", value: summary.total_muzakki.toString() },
           { category: "Total Mustahik", value: summary.total_mustahik.toString() },
-          { category: "Total Distribusi", value: summary.total_distributions.toString() },
+          { category: "Total Pendistribusian", value: summary.total_distributions.toString() },
         ],
         summary: {
           "Total Dana Zakat": formatCurrency(summary.zakat_fitrah_cash + summary.zakat_mal),
@@ -56,7 +56,7 @@ export function PeriodSummaryExport({ summary }: PeriodSummaryExportProps) {
           { category: "Fidyah (Makanan) - kg", value: summary.fidyah_food_kg },
           { category: "Total Muzakki", value: summary.total_muzakki },
           { category: "Total Mustahik", value: summary.total_mustahik },
-          { category: "Total Distribusi", value: summary.total_distributions },
+          { category: "Total Pendistribusian", value: summary.total_distributions },
         ],
         summary: {
           "Total Dana Zakat": summary.zakat_fitrah_cash + summary.zakat_mal,
