@@ -345,6 +345,18 @@ export default function Calculations() {
   const sampleCashPerAmil = amilCount > 0 ? Math.floor(sampleAmilCash / amilCount) : 0;
   const sampleRicePerAmil = amilCount > 0 ? Number((sampleAmilRice / amilCount).toFixed(2)) : 0;
 
+  // Fixed scenario example for easier field explanation.
+  const demoAmilCount = 10;
+  const demoBeneficiaryCount = 10;
+  const demoRecipientTotal = demoAmilCount + demoBeneficiaryCount;
+  const demoBaseAmilRatio = demoRecipientTotal > 0 ? demoAmilCount / demoRecipientTotal : 0;
+  const demoPercentageShare = amilPercentage;
+  const demoProportionalShare = demoBaseAmilRatio * amilShareFactor;
+  const demoPercentageCash = Math.round(sampleCash * demoPercentageShare);
+  const demoProportionalCash = Math.round(sampleCash * demoProportionalShare);
+  const demoPercentageRice = Number((sampleRiceKg * demoPercentageShare).toFixed(2));
+  const demoProportionalRice = Number((sampleRiceKg * demoProportionalShare).toFixed(2));
+
   const saveDistributionConfigMutation = useMutation({
     mutationFn: async () => {
       if (!selectedPeriod?.id) throw new Error("Periode belum dipilih");
@@ -598,6 +610,14 @@ export default function Calculations() {
                         <span className="font-medium">{sampleAmilRice.toFixed(2)} kg</span> dan non-amil{" "}
                         <span className="font-medium">{sampleBeneficiaryRice.toFixed(2)} kg</span>.
                       </p>
+                      <p>
+                        Contoh mudah (amil 10, non-amil 10): karena metode ini tetap {(amilPercentage * 100).toFixed(1)}%,
+                        maka dari <span className="font-medium">{formatCurrency(sampleCash)}</span> amil menerima{" "}
+                        <span className="font-medium">{formatCurrency(demoPercentageCash)}</span> (≈{" "}
+                        {formatCurrency(Math.floor(demoPercentageCash / demoAmilCount))}/amil) dan dari{" "}
+                        <span className="font-medium">{sampleRiceKg} kg</span> amil menerima{" "}
+                        <span className="font-medium">{demoPercentageRice.toFixed(2)} kg</span>.
+                      </p>
                     </>
                   ) : (
                     <>
@@ -620,6 +640,16 @@ export default function Calculations() {
                         Simulasi beras: dari <span className="font-medium">{sampleRiceKg.toFixed(0)} kg</span>, porsi amil{" "}
                         <span className="font-medium">{sampleAmilRice.toFixed(2)} kg</span> dan non-amil{" "}
                         <span className="font-medium">{sampleBeneficiaryRice.toFixed(2)} kg</span>.
+                      </p>
+                      <p>
+                        Contoh mudah (amil 10, non-amil 10): rasio amil = 10/(10+10) = 50%. Dengan faktor{" "}
+                        <span className="font-medium">{amilShareFactor.toFixed(2)}</span>, porsi amil jadi{" "}
+                        <span className="font-medium">{(demoProportionalShare * 100).toFixed(2)}%</span>.
+                        Dari <span className="font-medium">{formatCurrency(sampleCash)}</span> amil menerima{" "}
+                        <span className="font-medium">{formatCurrency(demoProportionalCash)}</span> (≈{" "}
+                        {formatCurrency(Math.floor(demoProportionalCash / demoAmilCount))}/amil) dan dari{" "}
+                        <span className="font-medium">{sampleRiceKg} kg</span> amil menerima{" "}
+                        <span className="font-medium">{demoProportionalRice.toFixed(2)} kg</span>.
                       </p>
                     </>
                   )}
