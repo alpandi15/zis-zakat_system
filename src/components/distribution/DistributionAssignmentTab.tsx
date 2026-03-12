@@ -398,7 +398,7 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
 
       {/* Assign Dialog (Admin only) */}
       <Dialog open={isAssignDialogOpen} onOpenChange={setIsAssignDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Tugaskan Mustahik ke Petugas</DialogTitle>
           </DialogHeader>

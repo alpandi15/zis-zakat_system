@@ -642,7 +642,7 @@ export default function ZakatMal() {
           if (!open) resetForm();
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingTransaction ? "Edit Transaksi Zakat Mal" : "Tambah Transaksi Zakat Mal"}</DialogTitle>
           </DialogHeader>

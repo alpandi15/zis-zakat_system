@@ -287,14 +287,19 @@ export function MuzakkiSearchSelect({
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent portalled={false} className="w-[min(420px,calc(100vw-1rem))] p-0" align="start">
+        <PopoverContent
+          portalled={false}
+          align="start"
+          sideOffset={6}
+          className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-1rem)] max-h-[min(70dvh,26rem)] overflow-hidden p-0"
+        >
           <Command shouldFilter={false}>
             <CommandInput
               placeholder="Cari nama atau telepon..."
               value={search}
               onValueChange={setSearch}
             />
-            <CommandList>
+            <CommandList className="max-h-[min(40dvh,14rem)] sm:max-h-[18rem]">
               <CommandEmpty>
                 <div className="py-2 text-center">
                   <p className="text-sm text-muted-foreground mb-2">Tidak ditemukan</p>
@@ -339,7 +344,7 @@ export function MuzakkiSearchSelect({
         if (!open) resetForm();
         setIsCreateOpen(open);
       }}>
-        <DialogContent className="max-h-[90dvh] w-[calc(100vw-0.9rem)] max-w-lg overflow-y-auto p-3 sm:p-5">
+        <DialogContent className="max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] w-[calc(100vw-0.9rem)] max-w-lg overflow-y-auto p-3 sm:p-5">
           <DialogHeader>
             <DialogTitle>
               {step === 1 ? "Tambah Muzakki Baru" : "Tambah Anggota Keluarga"}

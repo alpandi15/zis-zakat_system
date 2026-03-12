@@ -636,7 +636,7 @@ export default function FidyahPage() {
           if (!open) resetForm();
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingTransaction ? "Edit Transaksi Fidyah" : "Tambah Transaksi Fidyah"}</DialogTitle>
           </DialogHeader>
@@ -653,7 +653,7 @@ export default function FidyahPage() {
                     setPayerPhone(selected?.muzakki?.phone || "");
                     setPayerAddress(selected?.muzakki?.address || "");
                   }}
-                  placeholder="Cari anggota atau tambah muzakki baru..."
+                  placeholder="Cari muzzaki ..."
                 />
                 <p className="text-xs text-muted-foreground">
                   Pencarian langsung ke tabel anggota (`muzakki_members`). Jika belum ada, gunakan menu tambah muzakki baru.

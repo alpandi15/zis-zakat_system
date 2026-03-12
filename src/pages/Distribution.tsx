@@ -992,7 +992,7 @@ export default function Distribution() {
       </div>
 
       <Dialog open={isPackagingDetailOpen} onOpenChange={setIsPackagingDetailOpen}>
-        <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
+        <DialogContent className="max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[92dvh] max-w-6xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               Detail Pembungkusan {selectedBatch ? `- ${selectedBatch.batch_code || `BATCH-${selectedBatch.batch_no}`}` : ""}
@@ -1112,7 +1112,7 @@ export default function Distribution() {
       </Dialog>
 
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+        <DialogContent className="max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Calculator className="h-5 w-5" />

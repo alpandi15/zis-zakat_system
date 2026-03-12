@@ -246,7 +246,7 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {isEditing

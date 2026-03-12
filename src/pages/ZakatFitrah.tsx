@@ -30,7 +30,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Eye, Receipt, Pencil, ShieldAlert, Trash2 } from "lucide-react";
+import { Plus, Eye, Receipt, Pencil, ShieldAlert, Trash2, Wheat, Banknote } from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { formatCurrency } from "@/lib/formatCurrency";
@@ -699,14 +699,14 @@ export default function ZakatFitrah() {
                       <TableCell className="whitespace-nowrap">
                         {format(new Date(tx.transaction_date), "dd MMM yyyy", { locale: idLocale })}
                       </TableCell>
-                      <TableCell className="font-medium">{tx.muzakki?.name}</TableCell>
-                      <TableCell>
+                      <TableCell className="font-medium whitespace-nowrap">{tx.muzakki?.name}</TableCell>
+                      <TableCell className="whitespace-nowrap">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="outline">
                             {tx.payment_type === "rice" ? "Beras" : "Uang"}
                           </Badge>
                           {tx.payment_type === "rice" && tx.is_custom_total_rice && (
-                            <Badge variant="secondary">Custom Total</Badge>
+                            <Badge variant="secondary" className="!whitespace-nowrap">Custom Total</Badge>
                           )}
                         </div>
                       </TableCell>
@@ -714,7 +714,7 @@ export default function ZakatFitrah() {
                         {tx.is_void ? (
                           <Badge variant="destructive">Void</Badge>
                         ) : isTransactionLocked(tx) ? (
-                          <Badge variant="secondary" className="!whitespace-nowrap">
+                          <Badge variant="destructive" className="!whitespace-nowrap">
                             Lock {tx.locked_batch?.batch_code || `#${tx.locked_batch?.batch_no || "-"}`}
                           </Badge>
                         ) : (
@@ -783,7 +783,7 @@ export default function ZakatFitrah() {
           if (!open) resetForm();
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingTransaction ? "Edit Transaksi Zakat Fitrah" : "Tambah Transaksi Zakat Fitrah"}</DialogTitle>
           </DialogHeader>
@@ -891,16 +891,30 @@ export default function ZakatFitrah() {
 
             <div className="space-y-2">
               <Label>Jenis Pembayaran *</Label>
-              <RadioGroup value={paymentType} onValueChange={(v) => setPaymentType(v as "rice" | "money")}>
-                <div className="flex gap-4">
-                  <div className="flex items-center gap-2">
-                    <RadioGroupItem value="rice" id="rice" />
-                    <Label htmlFor="rice" className="cursor-pointer">Beras</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <RadioGroupItem value="money" id="money" />
-                    <Label htmlFor="money" className="cursor-pointer">Uang</Label>
-                  </div>
+              <RadioGroup
+                value={paymentType}
+                onValueChange={(v) => setPaymentType(v as "rice" | "money")}
+                className="grid grid-cols-2 gap-2 rounded-xl border border-border/70 bg-muted/30 p-1"
+              >
+                <div>
+                  <RadioGroupItem value="rice" id="payment-rice" className="peer sr-only" />
+                  <Label
+                    htmlFor="payment-rice"
+                    className="flex cursor-pointer items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-data-[state=checked]:bg-background peer-data-[state=checked]:text-foreground peer-data-[state=checked]:shadow-sm peer-data-[state=checked]:ring-1 peer-data-[state=checked]:ring-primary/25 sm:py-2.5 sm:text-sm"
+                  >
+                    <Wheat className="h-4 w-4" />
+                    Beras
+                  </Label>
+                </div>
+                <div>
+                  <RadioGroupItem value="money" id="payment-money" className="peer sr-only" />
+                  <Label
+                    htmlFor="payment-money"
+                    className="flex cursor-pointer items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-data-[state=checked]:bg-background peer-data-[state=checked]:text-foreground peer-data-[state=checked]:shadow-sm peer-data-[state=checked]:ring-1 peer-data-[state=checked]:ring-primary/25 sm:py-2.5 sm:text-sm"
+                  >
+                    <Banknote className="h-4 w-4" />
+                    Uang
+                  </Label>
                 </div>
               </RadioGroup>
             </div>
@@ -1039,11 +1053,11 @@ export default function ZakatFitrah() {
                 <CardContent className="pt-4">
                   <div className="flex justify-between items-center">
                     <div>
-                      <p className="text-sm text-muted-foreground">Total Pembayaran</p>
+                      <p className="text-sm text-muted-foreground pt-4">Total Pembayaran</p>
                       <p className="font-semibold">
                         {totalMembersCount} orang ×{" "}
                         {paymentType === "rice"
-                          ? `${effectiveRicePerPerson.toFixed(3)} kg`
+                          ? `${effectiveRicePerPerson.toFixed(1)} kg`
                           : `Rp ${cashPerPerson.toLocaleString("id-ID")}`}
                       </p>
                     </div>

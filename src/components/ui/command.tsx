@@ -64,7 +64,10 @@ const CommandList = React.forwardRef<
       event.stopPropagation();
       onWheel?.(event);
     }}
-    className={cn("max-h-[280px] overflow-y-auto overflow-x-hidden overscroll-contain sm:max-h-[320px]", className)}
+    className={cn(
+      "max-h-[min(42dvh,16rem)] overflow-y-auto overflow-x-hidden overscroll-contain sm:max-h-[320px]",
+      className,
+    )}
     {...props}
   />
 ));
