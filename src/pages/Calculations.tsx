@@ -9,6 +9,7 @@ import { useDistributionCalculation, type AmilDistributionMode } from "@/hooks/u
 import type { Enums, TablesInsert } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/formatCurrency";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Calculator, Coins, Wheat, Utensils, Scale, ArrowRight, Sparkles, Lock } from "lucide-react";
+import { Calculator, Coins, Wheat, Utensils, Scale, ArrowRight, Sparkles, Lock, Info } from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 
@@ -327,6 +328,23 @@ export default function Calculations() {
     [availableForNextBatch],
   );
 
+  const amilCount = calculations.amilList.length;
+  const beneficiaryCount = calculations.beneficiaryList.length;
+  const totalRecipients = amilCount + beneficiaryCount;
+  const amilPercentage = calculations.configuration.amilPercentage;
+  const baseAmilRatio = totalRecipients > 0 ? amilCount / totalRecipients : 0;
+  const effectiveAmilShare =
+    amilDistributionMode === "percentage" ? amilPercentage : baseAmilRatio * amilShareFactor;
+
+  const sampleCash = 1_000_000;
+  const sampleRiceKg = 100;
+  const sampleAmilCash = Math.round(sampleCash * effectiveAmilShare);
+  const sampleBeneficiaryCash = sampleCash - sampleAmilCash;
+  const sampleAmilRice = Number((sampleRiceKg * effectiveAmilShare).toFixed(2));
+  const sampleBeneficiaryRice = Number((sampleRiceKg - sampleAmilRice).toFixed(2));
+  const sampleCashPerAmil = amilCount > 0 ? Math.floor(sampleAmilCash / amilCount) : 0;
+  const sampleRicePerAmil = amilCount > 0 ? Number((sampleAmilRice / amilCount).toFixed(2)) : 0;
+
   const saveDistributionConfigMutation = useMutation({
     mutationFn: async () => {
       if (!selectedPeriod?.id) throw new Error("Periode belum dipilih");
@@ -553,6 +571,67 @@ export default function Calculations() {
                   setAmilShareFactor(Math.max(0, Math.min(1, raw)));
                 }}
               />
+            </div>
+
+            <div className="md:col-span-3">
+              <Alert className="border-primary/20 bg-primary/5">
+                <Info className="h-4 w-4" />
+                <AlertTitle>
+                  {amilDistributionMode === "percentage"
+                    ? "Metode: Persentase Tetap Amil"
+                    : "Metode: Rasio Jumlah Penerima x Faktor"}
+                </AlertTitle>
+                <AlertDescription className="space-y-2 text-xs sm:text-sm">
+                  {amilDistributionMode === "percentage" ? (
+                    <>
+                      <p>
+                        Rumus: <span className="font-medium">Porsi Amil = Total Dana x {(amilPercentage * 100).toFixed(1)}%</span>.
+                        Sisa dana dialokasikan ke mustahik non-amil.
+                      </p>
+                      <p>
+                        Simulasi: jika total kas <span className="font-medium">{formatCurrency(sampleCash)}</span>, maka amil menerima{" "}
+                        <span className="font-medium">{formatCurrency(sampleAmilCash)}</span> dan non-amil menerima{" "}
+                        <span className="font-medium">{formatCurrency(sampleBeneficiaryCash)}</span>.
+                      </p>
+                      <p>
+                        Simulasi beras: dari <span className="font-medium">{sampleRiceKg.toFixed(0)} kg</span>, porsi amil{" "}
+                        <span className="font-medium">{sampleAmilRice.toFixed(2)} kg</span> dan non-amil{" "}
+                        <span className="font-medium">{sampleBeneficiaryRice.toFixed(2)} kg</span>.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p>
+                        Rumus dasar: <span className="font-medium">Rasio Amil = Jumlah Amil / (Jumlah Amil + Jumlah Non-Amil)</span>.
+                        Porsi akhir amil = Total Dana x Rasio Amil x Faktor.
+                      </p>
+                      <p>
+                        Kondisi saat ini: {amilCount} amil, {beneficiaryCount} non-amil, rasio amil{" "}
+                        <span className="font-medium">{(baseAmilRatio * 100).toFixed(2)}%</span>, faktor{" "}
+                        <span className="font-medium">{amilShareFactor.toFixed(2)}</span>, sehingga porsi amil efektif{" "}
+                        <span className="font-medium">{(effectiveAmilShare * 100).toFixed(2)}%</span>.
+                      </p>
+                      <p>
+                        Simulasi: jika total kas <span className="font-medium">{formatCurrency(sampleCash)}</span>, amil menerima{" "}
+                        <span className="font-medium">{formatCurrency(sampleAmilCash)}</span> dan non-amil menerima{" "}
+                        <span className="font-medium">{formatCurrency(sampleBeneficiaryCash)}</span>.
+                      </p>
+                      <p>
+                        Simulasi beras: dari <span className="font-medium">{sampleRiceKg.toFixed(0)} kg</span>, porsi amil{" "}
+                        <span className="font-medium">{sampleAmilRice.toFixed(2)} kg</span> dan non-amil{" "}
+                        <span className="font-medium">{sampleBeneficiaryRice.toFixed(2)} kg</span>.
+                      </p>
+                    </>
+                  )}
+                  <p>
+                    Perkiraan per amil: sekitar <span className="font-medium">{formatCurrency(sampleCashPerAmil)}</span> kas dan{" "}
+                    <span className="font-medium">{sampleRicePerAmil.toFixed(2)} kg</span> beras per orang amil (simulasi, sebelum pembulatan akhir).
+                  </p>
+                  <p className="text-muted-foreground">
+                    Catatan: Fidyah (uang/makanan) pada sistem ini tidak dialokasikan untuk amil, seluruhnya dibagikan ke mustahik yang berhak.
+                  </p>
+                </AlertDescription>
+              </Alert>
             </div>
 
             <div className="md:col-span-3 flex justify-end">
