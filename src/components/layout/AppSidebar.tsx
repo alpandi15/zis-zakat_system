@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/router";
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
@@ -38,7 +39,6 @@ import {
   FileBarChart,
   Settings,
   LogOut,
-  Shield,
   Lock,
   UserCog,
   Calculator,
@@ -212,8 +212,15 @@ export function AppSidebar() {
     >
       <SidebarHeader className="border-b border-sidebar-border/70 px-4 pb-4 pt-5">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-cyan-500 text-primary-foreground shadow-md shadow-primary/25">
-            <Shield className="h-5 w-5" />
+          <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-2xl border border-border/60 bg-background shadow-md shadow-primary/15">
+            <Image
+              src="/logo.png"
+              alt="AmanahZIS Logo"
+              fill
+              sizes="40px"
+              className="object-cover"
+              priority
+            />
           </div>
           {!collapsed && (
             <div className="flex min-w-0 flex-col">

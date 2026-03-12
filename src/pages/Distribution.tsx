@@ -779,7 +779,7 @@ export default function Distribution() {
       <div className="space-y-4">
         <Card className="border-border/70 bg-gradient-to-r from-cyan-50 to-emerald-50">
           <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-            <div>
+            <div className="md:pt-4">
               <h2 className="text-base font-semibold">Eksekusi Pendistribusian Dana per Periode</h2>
               <p className="text-sm text-muted-foreground">
                 Halaman ini fokus untuk eksekusi penyaluran dan penugasan pengiriman.

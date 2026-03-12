@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
@@ -6,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Shield, Mail, Lock, Loader2, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, Loader2, Sparkles, CheckCircle2 } from 'lucide-react';
 import { z } from 'zod';
 
 const emailSchema = z.string().email('Please enter a valid email address');
@@ -115,8 +116,15 @@ export default function Auth() {
           <Card className="mx-auto w-full max-w-xl rounded-3xl border border-white/15 bg-white/95 shadow-[0_30px_80px_-32px_rgba(0,0,0,0.55)] backdrop-blur-xl">
             <CardHeader className="space-y-3 pb-3">
               <div className="flex items-center justify-center">
-                <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-cyan-500 text-white shadow-md">
-                  <Shield className="h-7 w-7" />
+                <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-md">
+                  <Image
+                    src="/logo.png"
+                    alt="AmanahZIS Logo"
+                    fill
+                    sizes="64px"
+                    className="object-cover"
+                    priority
+                  />
                 </div>
               </div>
               <div className="text-center">
