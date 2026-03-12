@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/router";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -12,6 +13,7 @@ import { PeriodSelector } from "@/components/dashboard/PeriodSelector";
 import { FundComparisonChart } from "@/components/dashboard/FundComparisonChart";
 import { MemberZakatTable } from "@/components/dashboard/MemberZakatTable";
 import { formatCurrency, formatWeight } from "@/lib/exportUtils";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -22,6 +24,7 @@ import {
   Settings2,
   Scale,
   Activity,
+  ExternalLink,
 } from "lucide-react";
 
 export default function Dashboard() {
@@ -120,13 +123,19 @@ export default function Dashboard() {
                 Fokus pada data inti penerimaan, status distribusi, dan rekap anggota.
               </p>
             </div>
-            <div className="w-full xl:w-auto">
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
               <PeriodSelector
                 periods={periods || []}
                 selectedPeriod={selectedPeriod}
                 onPeriodChange={setSelectedPeriod}
                 isLoading={periodsLoading}
               />
+              <Button asChild variant="outline" className="h-10 gap-2 whitespace-nowrap">
+                <Link href="/tv" target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-4 w-4" />
+                  Live Monitoring
+                </Link>
+              </Button>
             </div>
           </div>
         </div>

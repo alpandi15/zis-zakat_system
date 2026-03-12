@@ -17,15 +17,15 @@ type SeoEntry = {
 };
 
 const DEFAULT_SEO: SeoEntry = {
-  title: "AmanahZIS",
+  title: "Sistem Manajemen Zakat Masjid",
   description:
-    "Aplikasi manajemen zakat fitrah, zakat mal, fidyah, dan pendistribusian mustahik untuk operasional masjid.",
+    "Platform profesional untuk pengelolaan zakat fitrah, zakat mal, fidyah, perhitungan distribusi, dan pelaporan operasional masjid.",
 };
 
 const ROUTE_SEO: Record<string, SeoEntry> = {
   "/": {
-    title: "Beranda",
-    description: "Portal AmanahZIS untuk manajemen zakat dan fidyah.",
+    title: "Beranda Operasional",
+    description: "Portal AmanahZIS untuk monitoring penerimaan dan pendistribusian zakat secara terstruktur.",
     noIndex: true,
   },
   "/auth": {
@@ -34,8 +34,8 @@ const ROUTE_SEO: Record<string, SeoEntry> = {
     noIndex: true,
   },
   "/dashboard": {
-    title: "Dashboard",
-    description: "Ringkasan penerimaan zakat, fidyah, status distribusi, dan statistik operasional periode aktif.",
+    title: "Dashboard Operasional",
+    description: "Ringkasan profesional penerimaan zakat, status distribusi, dan performa operasional periode aktif.",
   },
   "/periods": {
     title: "Periode",
@@ -94,8 +94,8 @@ const ROUTE_SEO: Record<string, SeoEntry> = {
     description: "Kelola akun pengguna dan hak akses role aplikasi.",
   },
   "/tv": {
-    title: "Public TV Dashboard",
-    description: "Papan informasi publik penerimaan dan distribusi zakat secara real-time.",
+    title: "Live Monitoring TV",
+    description: "Papan informasi publik real-time untuk penerimaan dan pendistribusian zakat masjid.",
   },
   "/404": {
     title: "Halaman Tidak Ditemukan",
