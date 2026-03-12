@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
@@ -224,11 +224,43 @@ function usePublicDashboardData() {
 export default function PublicTVDashboard() {
   const { data, isLoading, dataUpdatedAt } = usePublicDashboardData();
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [watchingCount, setWatchingCount] = useState(1);
+  const presenceKeyRef = useRef(`tv-${Math.random().toString(36).slice(2)}-${Date.now()}`);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const channel = supabase.channel("public-tv-watchers", {
+      config: {
+        presence: {
+          key: presenceKeyRef.current,
+        },
+      },
+    });
+
+    channel.on("presence", { event: "sync" }, () => {
+      const state = channel.presenceState();
+      const total = Object.values(state).reduce((sum, items) => sum + items.length, 0);
+      setWatchingCount(Math.max(1, total));
+    });
+
+    channel.subscribe(async (status) => {
+      if (status !== "SUBSCRIBED") return;
+      await channel.track({
+        page: "tv",
+        period_id: data?.period?.id || null,
+        online_at: new Date().toISOString(),
+      });
+    });
+
+    return () => {
+      void channel.untrack();
+      void supabase.removeChannel(channel);
+    };
+  }, [data?.period?.id]);
 
   const cashComposition = useMemo(() => {
     if (!data) return [];
@@ -280,10 +312,14 @@ export default function PublicTVDashboard() {
       <div className="relative mx-auto max-w-[1800px] space-y-5 p-4 md:space-y-6 md:p-7">
         <header className="animate-in fade-in slide-in-from-top-2 duration-700 rounded-3xl border border-white/10 bg-slate-900/70 p-5 text-slate-100 backdrop-blur-md md:p-7">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="space-y-2">
+            <div className="space-y-2 space-x-2">
               <Badge className="w-fit border-emerald-400/40 bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/20">
                 <Sparkles className="mr-1 h-3 w-3" />
                 LIVE MONITORING
+              </Badge>
+              <Badge variant="outline" className="w-fit border-cyan-300/40 bg-cyan-500/10 text-cyan-100">
+                <Users className="mr-1 h-3 w-3" />
+                Sedang Menonton: {watchingCount.toLocaleString("id-ID")}
               </Badge>
               <h1 className="text-2xl font-semibold tracking-tight md:text-4xl">Papan Informasi Zakat Masjid</h1>
               <p className="text-sm text-slate-300 md:text-lg">
@@ -530,9 +566,16 @@ export default function PublicTVDashboard() {
       </div>
 
       <div className="pointer-events-none fixed bottom-3 right-3 rounded-full bg-emerald-500/20 px-3 py-1 text-xs text-emerald-200">
-        <span className="inline-flex items-center gap-1">
+        <span className="inline-flex items-center gap-2">
+          <span className="inline-flex items-center gap-1">
+            <Users className="h-3.5 w-3.5" />
+            {watchingCount.toLocaleString("id-ID")}
+          </span>
+          <span className="text-emerald-200/70">•</span>
+          <span className="inline-flex items-center gap-1">
           <Clock3 className="h-3.5 w-3.5" />
           Live Refresh 30s
+          </span>
         </span>
       </div>
     </div>
