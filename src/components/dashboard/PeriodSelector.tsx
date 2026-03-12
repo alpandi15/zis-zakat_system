@@ -29,17 +29,17 @@ export function PeriodSelector({
   isLoading,
 }: PeriodSelectorProps) {
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex w-full flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
       <div className="flex items-center gap-2 text-muted-foreground">
         <Calendar className="h-4 w-4" />
-        <span className="text-sm font-medium">Periode:</span>
+        <span className="text-xs font-medium sm:text-sm">Periode</span>
       </div>
       <Select
         value={selectedPeriod || undefined}
         onValueChange={onPeriodChange}
         disabled={isLoading}
       >
-        <SelectTrigger className="w-[280px]">
+        <SelectTrigger className="w-full sm:w-[320px]">
           <SelectValue placeholder="Pilih periode" />
         </SelectTrigger>
         <SelectContent>

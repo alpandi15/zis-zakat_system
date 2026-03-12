@@ -74,14 +74,6 @@ export default function AdminMembers() {
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["admin-members"],
     queryFn: async () => {
-      // Fetch profiles
-      const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (profilesError) throw profilesError;
-
       // Fetch all user roles
       const { data: roles, error: rolesError } = await supabase
         .from("user_roles")
@@ -89,9 +81,28 @@ export default function AdminMembers() {
 
       if (rolesError) throw rolesError;
 
-      // Combine profiles with their primary role
-      return profiles.map((profile) => {
-        const userRoles = roles.filter((r) => r.user_id === profile.id);
+      // Fetch profiles (best effort). Some deployments may temporarily miss profile rows
+      // for newly-created auth users; we still render users from user_roles fallback.
+      const { data: profiles, error: profilesError } = await supabase
+        .from("profiles")
+        .select("*");
+      if (profilesError) {
+        console.warn("Failed to fetch profiles for admin-members:", profilesError.message);
+      }
+
+      const safeProfiles = profiles || [];
+      const profileById = new Map(safeProfiles.map((profile) => [profile.id, profile]));
+
+      const allUserIds = new Set<string>([
+        ...safeProfiles.map((profile) => profile.id),
+        ...(roles || []).map((roleRow) => roleRow.user_id),
+      ]);
+
+      // Combine role + profile rows. If profile is missing we still show role row so
+      // admin can see newly-created users and verify role assignment.
+      const mergedUsers = Array.from(allUserIds).map((userId) => {
+        const profile = profileById.get(userId);
+        const userRoles = roles.filter((r) => r.user_id === userId);
         // Get highest priority role
         const primaryRole = userRoles.find((r) => r.role === "super_admin")?.role ||
           userRoles.find((r) => r.role === "chairman")?.role ||
@@ -103,12 +114,18 @@ export default function AdminMembers() {
           null;
 
         return {
-          id: profile.id,
-          email: profile.email,
-          full_name: profile.full_name,
+          id: userId,
+          email: profile?.email || null,
+          full_name: profile?.full_name || (profile ? null : "(Profil belum sinkron)"),
           role: primaryRole as AppRole | null,
-          created_at: profile.created_at,
+          created_at: profile?.created_at || userRoles[0]?.created_at || new Date(0).toISOString(),
         };
+      });
+
+      return mergedUsers.sort((a, b) => {
+        const aTime = new Date(a.created_at).getTime();
+        const bTime = new Date(b.created_at).getTime();
+        return bTime - aTime;
       });
     },
     enabled: canManageUsers,
@@ -198,6 +215,26 @@ export default function AdminMembers() {
         if (roleInsertError) throw roleInsertError;
       };
 
+      const ensureUserVisibleInAdminList = async (createdUserId: string) => {
+        // Best effort profile sync (only updates existing row via RLS policy).
+        const { error: profileUpdateError } = await supabase
+          .from("profiles")
+          .update({
+            email,
+            full_name,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", createdUserId);
+
+        if (profileUpdateError) {
+          console.warn("Profile update after create-user failed:", profileUpdateError.message);
+        }
+
+        // Make role assignment deterministic (including viewer), so the user
+        // always appears in the admin listing even if DB trigger timing varies.
+        await updateUserRole(createdUserId);
+      };
+
       // Primary path: Edge Function (recommended for immediate confirmed account)
       const { data, error } = await supabase.functions.invoke("create-user", {
         body: { email, password, full_name, role },
@@ -205,6 +242,11 @@ export default function AdminMembers() {
 
       if (!error) {
         if (data?.error) throw new Error(data.error);
+        const createdUserId = data?.user?.id;
+        if (!createdUserId) {
+          throw new Error("User berhasil dibuat tapi ID user tidak ditemukan");
+        }
+        await ensureUserVisibleInAdminList(createdUserId);
         return data;
       }
 
@@ -239,14 +281,7 @@ export default function AdminMembers() {
           throw new Error("User berhasil dibuat tapi ID user tidak ditemukan");
         }
 
-        // Ensure profile name is populated.
-        const { error: profileUpdateError } = await supabase
-          .from("profiles")
-          .update({ full_name })
-          .eq("id", createdUserId);
-        if (profileUpdateError) throw profileUpdateError;
-
-        await updateUserRole(createdUserId);
+        await ensureUserVisibleInAdminList(createdUserId);
 
         return {
           success: true,

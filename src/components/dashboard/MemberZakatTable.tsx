@@ -39,6 +39,8 @@ export function MemberZakatTable({
       item.member_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.muzakki_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  const totalRice = filteredData.reduce((sum, item) => sum + (item.paid_rice_kg || 0), 0);
+  const totalMoney = filteredData.reduce((sum, item) => sum + (item.paid_money || 0), 0);
 
   const handleExportPDF = () => {
     exportToPDF(
@@ -111,30 +113,56 @@ export function MemberZakatTable({
   };
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-        <CardTitle className="text-lg">Data Zakat Fitrah Per Anggota</CardTitle>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Cari nama..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-[200px] pl-9"
-            />
+    <Card className="border-border/70">
+      <CardHeader className="space-y-3 pb-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-1">
+            <CardTitle className="text-base sm:text-lg">Data Zakat Fitrah Per Anggota</CardTitle>
+            <p className="text-xs text-muted-foreground sm:text-sm">
+              Riwayat pembayaran anggota keluarga per periode terpilih.
+            </p>
           </div>
-          <Button variant="outline" size="sm" onClick={handleExportPDF}>
-            <FileText className="mr-2 h-4 w-4" />
-            PDF
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleExportExcel}>
-            <FileSpreadsheet className="mr-2 h-4 w-4" />
-            Excel
-          </Button>
+          <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
+            <div className="relative w-full sm:w-[230px]">
+              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Cari nama anggota/muzakki..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-9 pl-8 text-xs sm:text-sm"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={handleExportPDF} className="flex-1 sm:flex-none">
+                <FileText className="mr-1.5 h-3.5 w-3.5" />
+                PDF
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleExportExcel} className="flex-1 sm:flex-none">
+                <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
+                Excel
+              </Button>
+            </div>
+          </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        {!isLoading && filteredData.length > 0 && (
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">Total Anggota</p>
+              <p className="mt-0.5 whitespace-nowrap text-sm font-semibold">{filteredData.length} data</p>
+            </div>
+            <div className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">Total Beras</p>
+              <p className="mt-0.5 whitespace-nowrap text-sm font-semibold">{formatWeight(totalRice)}</p>
+            </div>
+            <div className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">Total Uang</p>
+              <p className="mt-0.5 whitespace-nowrap text-sm font-semibold">{formatCurrency(totalMoney)}</p>
+            </div>
+          </div>
+        )}
+
         {isLoading ? (
           <div className="flex h-[200px] items-center justify-center">
             <p className="text-muted-foreground">Memuat data...</p>
@@ -144,45 +172,43 @@ export function MemberZakatTable({
             <p className="text-muted-foreground">Tidak ada data</p>
           </div>
         ) : (
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nama Anggota</TableHead>
-                  <TableHead>Nama Muzakki</TableHead>
-                  <TableHead>Hubungan</TableHead>
-                  <TableHead className="text-right">Beras (kg)</TableHead>
-                  <TableHead className="text-right">Uang (Rp)</TableHead>
-                  <TableHead>Tanggal</TableHead>
+          <Table className="min-w-[760px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="whitespace-nowrap">Nama Anggota</TableHead>
+                <TableHead className="whitespace-nowrap">Nama Muzakki</TableHead>
+                <TableHead className="whitespace-nowrap">Hubungan</TableHead>
+                <TableHead className="whitespace-nowrap text-right">Beras (kg)</TableHead>
+                <TableHead className="whitespace-nowrap text-right">Uang (Rp)</TableHead>
+                <TableHead className="whitespace-nowrap">Tanggal</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredData.slice(0, 10).map((item, index) => (
+                <TableRow key={`${item.member_id}-${index}`}>
+                  <TableCell className="max-w-[200px] truncate text-[13px] font-medium">
+                    {item.member_name}
+                  </TableCell>
+                  <TableCell className="max-w-[200px] truncate text-[13px]">{item.muzakki_name}</TableCell>
+                  <TableCell className="text-[13px]">
+                    <span className="whitespace-nowrap rounded-full bg-muted px-2 py-1 text-[11px]">
+                      {RELATIONSHIP_LABELS[item.relationship] || item.relationship}
+                    </span>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-right text-[13px]">
+                    {item.paid_rice_kg ? formatWeight(item.paid_rice_kg) : "-"}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-right text-[13px]">
+                    {item.paid_money ? formatCurrency(item.paid_money) : "-"}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-[13px]">{formatDate(item.transaction_date)}</TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredData.slice(0, 10).map((item, index) => (
-                  <TableRow key={`${item.member_id}-${index}`}>
-                    <TableCell className="font-medium">
-                      {item.member_name}
-                    </TableCell>
-                    <TableCell>{item.muzakki_name}</TableCell>
-                    <TableCell>
-                      <span className="rounded-full bg-muted px-2 py-1 text-xs">
-                        {RELATIONSHIP_LABELS[item.relationship] || item.relationship}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {item.paid_rice_kg ? formatWeight(item.paid_rice_kg) : "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {item.paid_money ? formatCurrency(item.paid_money) : "-"}
-                    </TableCell>
-                    <TableCell>{formatDate(item.transaction_date)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </Table>
         )}
         {filteredData.length > 10 && (
-          <p className="mt-3 text-center text-sm text-muted-foreground">
+          <p className="text-center text-xs text-muted-foreground sm:text-sm">
             Menampilkan 10 dari {filteredData.length} data. Export untuk melihat semua.
           </p>
         )}

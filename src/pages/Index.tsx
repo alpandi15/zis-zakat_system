@@ -75,8 +75,8 @@ export default function Index() {
               <Shield className="h-5 w-5 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-foreground">Islamic Fund Management</h1>
-              <p className="text-sm text-muted-foreground">Secure Dashboard</p>
+              <h1 className="text-lg font-semibold text-foreground">AmanahZIS</h1>
+              <p className="text-sm text-muted-foreground">Platform Operasional ZIS Masjid</p>
             </div>
           </div>
           <Button variant="outline" onClick={handleSignOut} className="gap-2">

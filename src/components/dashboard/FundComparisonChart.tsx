@@ -45,9 +45,9 @@ export function FundComparisonChart({
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Perbandingan Penerimaan Zakat vs Fidyah</CardTitle>
+          <CardTitle className="text-base sm:text-lg">Perbandingan Penerimaan Zakat vs Fidyah</CardTitle>
         </CardHeader>
-        <CardContent className="h-[300px] flex items-center justify-center">
+        <CardContent className="flex h-[240px] items-center justify-center sm:h-[280px]">
           <p className="text-muted-foreground">Memuat data...</p>
         </CardContent>
       </Card>
@@ -56,7 +56,7 @@ export function FundComparisonChart({
 
   const barData = [
     {
-      name: "Zakat Fitrah (Uang)",
+      name: "ZF Uang",
       value: data.zakatFitrahCash,
       fill: COLORS.zakatFitrahCash,
     },
@@ -66,7 +66,7 @@ export function FundComparisonChart({
       fill: COLORS.zakatMal,
     },
     {
-      name: "Fidyah (Uang)",
+      name: "Fidyah Uang",
       value: data.fidyahCash,
       fill: COLORS.fidyahCash,
     },
@@ -78,17 +78,18 @@ export function FundComparisonChart({
   ];
 
   return (
-    <div className="grid gap-6 md:grid-cols-2">
+    <div className="grid gap-4 xl:grid-cols-2">
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Perbandingan Dana (Uang)</CardTitle>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Perbandingan Dana Tunai</CardTitle>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={240}>
             <BarChart data={barData} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" horizontal={false} />
               <XAxis
                 type="number"
+                tick={{ fontSize: 11 }}
                 tickFormatter={(value) =>
                   new Intl.NumberFormat("id-ID", {
                     notation: "compact",
@@ -96,7 +97,7 @@ export function FundComparisonChart({
                   }).format(value)
                 }
               />
-              <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12 }} />
+              <YAxis type="category" dataKey="name" width={95} tick={{ fontSize: 11 }} />
               <Tooltip
                 formatter={(value: number) => formatCurrency(value)}
                 contentStyle={{
@@ -111,24 +112,20 @@ export function FundComparisonChart({
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Komposisi Penerimaan Zakat vs Fidyah</CardTitle>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Komposisi Zakat vs Fidyah</CardTitle>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={240}>
             <PieChart>
               <Pie
                 data={pieData}
                 cx="50%"
                 cy="50%"
-                innerRadius={60}
-                outerRadius={100}
+                innerRadius={56}
+                outerRadius={90}
                 paddingAngle={5}
                 dataKey="value"
-                label={({ name, percent }) =>
-                  `${name}: ${(percent * 100).toFixed(0)}%`
-                }
-                labelLine={false}
               >
                 {pieData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.fill} />
@@ -141,7 +138,7 @@ export function FundComparisonChart({
                   border: "1px solid hsl(var(--border))",
                 }}
               />
-              <Legend />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
             </PieChart>
           </ResponsiveContainer>
         </CardContent>

@@ -39,7 +39,14 @@ import { cn } from "@/lib/utils";
 
 interface MuzakkiSearchSelectProps {
   value: string;
-  onChange: (value: string) => void;
+  onChange: (
+    value: string,
+    meta?: {
+      source?: "existing" | "created";
+      recommendedFitrahCount?: number;
+      createdMemberIds?: string[];
+    },
+  ) => void;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -86,6 +93,8 @@ export function MuzakkiSearchSelect({
   const [members, setMembers] = useState<MemberInput[]>([
     { id: crypto.randomUUID(), name: "", relationship: "head_of_family", is_dependent: true },
   ]);
+  const [useMemberInput, setUseMemberInput] = useState(false);
+  const [manualFitrahCount, setManualFitrahCount] = useState(1);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -130,29 +139,70 @@ export function MuzakkiSearchSelect({
 
       if (muzakkiError) throw muzakkiError;
 
-      // Create members
-      const validMembers = members.filter(m => m.name.trim());
-      if (validMembers.length > 0) {
-        const { error: membersError } = await supabase
+      let recommendedFitrahCount = 1;
+      let createdMemberIds: string[] = [];
+
+      // Option 1: without member details, create default head-of-family member
+      if (!useMemberInput) {
+        if (!Number.isFinite(manualFitrahCount) || manualFitrahCount < 1) {
+          throw new Error("Jumlah fitrah minimal 1 orang");
+        }
+
+        const { data: headMember, error: headMemberError } = await supabase
+          .from("muzakki_members")
+          .insert({
+            muzakki_id: newMuzakki.id,
+            name: muzakkiData.name.trim(),
+            relationship: "head_of_family",
+            is_dependent: true,
+          })
+          .select("id")
+          .single();
+        if (headMemberError) throw headMemberError;
+
+        recommendedFitrahCount = Math.max(1, Math.floor(manualFitrahCount));
+        createdMemberIds = headMember?.id ? [headMember.id] : [];
+      } else {
+        // Option 2: keep existing detailed member flow
+        const validMembers = members.filter((m) => m.name.trim());
+        if (validMembers.length === 0) {
+          throw new Error("Minimal satu anggota harus diisi");
+        }
+
+        const { data: insertedMembers, error: membersError } = await supabase
           .from("muzakki_members")
           .insert(
-            validMembers.map(m => ({
+            validMembers.map((m) => ({
               muzakki_id: newMuzakki.id,
               name: m.name.trim(),
               relationship: m.relationship as "head_of_family" | "wife" | "child" | "parent",
               is_dependent: m.is_dependent,
-            }))
-          );
+            })),
+          )
+          .select("id, is_dependent");
         if (membersError) throw membersError;
+
+        const dependentCount =
+          insertedMembers?.filter((member) => member.is_dependent).length || 0;
+        recommendedFitrahCount = dependentCount > 0 ? dependentCount : validMembers.length;
+        createdMemberIds = (insertedMembers || []).map((member) => member.id);
       }
 
-      return newMuzakki;
+      return {
+        muzakki: newMuzakki,
+        recommendedFitrahCount,
+        createdMemberIds,
+      };
     },
-    onSuccess: (newMuzakki) => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["muzakki-active"] });
       queryClient.invalidateQueries({ queryKey: ["muzakki"] });
       queryClient.invalidateQueries({ queryKey: ["muzakki-members"] });
-      onChange(newMuzakki.id);
+      onChange(result.muzakki.id, {
+        source: "created",
+        recommendedFitrahCount: result.recommendedFitrahCount,
+        createdMemberIds: result.createdMemberIds,
+      });
       resetForm();
       setIsCreateOpen(false);
       toast({ title: "Muzakki berhasil ditambahkan" });
@@ -166,11 +216,13 @@ export function MuzakkiSearchSelect({
     setStep(1);
     setMuzakkiData({ name: "", phone: "", address: "", notes: "" });
     setMembers([{ id: crypto.randomUUID(), name: "", relationship: "head_of_family", is_dependent: true }]);
+    setUseMemberInput(false);
+    setManualFitrahCount(1);
   };
 
   const handleOpenCreate = () => {
     setSearch("");
-    setMuzakkiData({ ...muzakkiData, name: search });
+    setMuzakkiData((prev) => ({ ...prev, name: search }));
     setOpen(false);
     setIsCreateOpen(true);
   };
@@ -202,7 +254,16 @@ export function MuzakkiSearchSelect({
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    const validMembers = members.filter(m => m.name.trim());
+    if (!useMemberInput) {
+      if (!Number.isFinite(manualFitrahCount) || manualFitrahCount < 1) {
+        toast({ variant: "destructive", title: "Jumlah fitrah minimal 1 orang" });
+        return;
+      }
+      createMutation.mutate();
+      return;
+    }
+
+    const validMembers = members.filter((m) => m.name.trim());
     if (validMembers.length === 0) {
       toast({ variant: "destructive", title: "Minimal satu anggota harus diisi" });
       return;
@@ -226,7 +287,7 @@ export function MuzakkiSearchSelect({
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[min(420px,calc(100vw-1rem))] p-0" align="start">
+        <PopoverContent portalled={false} className="w-[min(420px,calc(100vw-1rem))] p-0" align="start">
           <Command shouldFilter={false}>
             <CommandInput
               placeholder="Cari nama atau telepon..."
@@ -249,7 +310,7 @@ export function MuzakkiSearchSelect({
                     key={m.id}
                     value={m.id}
                     onSelect={() => {
-                      onChange(m.id);
+                      onChange(m.id, { source: "existing" });
                       setOpen(false);
                     }}
                   >
@@ -327,66 +388,99 @@ export function MuzakkiSearchSelect({
 
           {step === 2 && (
             <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
-              <p className="text-xs text-muted-foreground sm:text-sm">
-                Tambahkan minimal satu anggota keluarga.
-              </p>
-              <div className="space-y-2.5 max-h-[48dvh] overflow-y-auto pr-1 sm:max-h-[300px]">
-                {members.map((member, index) => (
-                  <div key={member.id} className="space-y-2 rounded-xl border p-2.5 sm:p-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium sm:text-sm">Anggota {index + 1}</span>
-                      {members.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive sm:h-8 sm:w-8"
-                          onClick={() => removeMember(member.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <Input
-                        value={member.name}
-                        onChange={(e) => updateMember(member.id, "name", e.target.value)}
-                        placeholder="Nama"
-                      />
-                      <Select
-                        value={member.relationship}
-                        onValueChange={(v) => updateMember(member.id, "relationship", v)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {RELATIONSHIP_OPTIONS.map(opt => (
-                            <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center justify-between rounded-lg border px-2.5 py-2">
-                      <Label className="text-[11px] sm:text-xs">Termasuk Tanggungan</Label>
-                      <Switch
-                        checked={member.is_dependent}
-                        onCheckedChange={(checked) =>
-                          setMembers((prev) =>
-                            prev.map((m) => (m.id === member.id ? { ...m, is_dependent: checked } : m))
-                          )
-                        }
-                      />
-                    </div>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+                <div>
+                  <Label className="text-xs sm:text-sm">Input Anggota Keluarga</Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Nonaktif: cukup isi jumlah fitrah (orang), tanpa detail anggota.
+                  </p>
+                </div>
+                <Switch checked={useMemberInput} onCheckedChange={setUseMemberInput} />
               </div>
-              <Button type="button" variant="outline" onClick={addMember} className="h-9 w-full gap-1 text-xs sm:h-10 sm:text-sm">
-                <Plus className="h-4 w-4" />
-                Tambah Anggota
-              </Button>
+
+              {!useMemberInput ? (
+                <div className="space-y-2 rounded-xl border p-3">
+                  <Label htmlFor="manualFitrahCount">Jumlah Fitrah (Orang) *</Label>
+                  <Input
+                    id="manualFitrahCount"
+                    type="number"
+                    min={1}
+                    value={manualFitrahCount}
+                    onChange={(e) => setManualFitrahCount(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Sistem tetap membuat 1 data anggota default (Kepala Keluarga) di `muzakki_members`.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground sm:text-sm">
+                    Tambahkan minimal satu anggota keluarga.
+                  </p>
+                  <div className="space-y-2.5 max-h-[48dvh] overflow-y-auto pr-1 sm:max-h-[300px]">
+                    {members.map((member, index) => (
+                      <div key={member.id} className="space-y-2 rounded-xl border p-2.5 sm:p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium sm:text-sm">Anggota {index + 1}</span>
+                          {members.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive sm:h-8 sm:w-8"
+                              onClick={() => removeMember(member.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <Input
+                            value={member.name}
+                            onChange={(e) => updateMember(member.id, "name", e.target.value)}
+                            placeholder="Nama"
+                          />
+                          <Select
+                            value={member.relationship}
+                            onValueChange={(v) => updateMember(member.id, "relationship", v)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {RELATIONSHIP_OPTIONS.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex items-center justify-between rounded-lg border px-2.5 py-2">
+                          <Label className="text-[11px] sm:text-xs">Termasuk Tanggungan</Label>
+                          <Switch
+                            checked={member.is_dependent}
+                            onCheckedChange={(checked) =>
+                              setMembers((prev) =>
+                                prev.map((m) => (m.id === member.id ? { ...m, is_dependent: checked } : m)),
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={addMember}
+                    className="h-9 w-full gap-1 text-xs sm:h-10 sm:text-sm"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Tambah Anggota
+                  </Button>
+                </>
+              )}
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
                 <Button type="button" variant="outline" onClick={() => setStep(1)} className="w-full sm:w-auto">
                   Kembali

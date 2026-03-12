@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { useRouter } from "next/router";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { usePeriod } from "@/contexts/PeriodContext";
@@ -93,6 +94,8 @@ export function AppSidebar() {
   const { profile, signOut, hasRole } = useAuth();
   const { periods, selectedPeriod, setSelectedPeriodId, isReadOnly } = usePeriod();
   const currentPath = router.asPath.split("?")[0];
+  const sidebarContentRef = useRef<HTMLDivElement | null>(null);
+  const sidebarScrollStorageKey = "zakatku:sidebar-scroll-top";
 
   const isActive = (path: string) => currentPath === path;
   const isGroupActive = (item: NavItem) =>
@@ -102,6 +105,44 @@ export function AppSidebar() {
       setOpenMobile(false);
     }
   };
+
+  useEffect(() => {
+    if (typeof window === "undefined" || isMobile) return;
+
+    const container = sidebarContentRef.current;
+    if (!container) return;
+
+    const savedValue = window.sessionStorage.getItem(sidebarScrollStorageKey);
+    if (savedValue) {
+      const parsed = Number(savedValue);
+      if (Number.isFinite(parsed)) {
+        container.scrollTop = parsed;
+      }
+    }
+
+    const persistScroll = () => {
+      window.sessionStorage.setItem(sidebarScrollStorageKey, String(container.scrollTop));
+    };
+
+    container.addEventListener("scroll", persistScroll, { passive: true });
+    router.events.on("routeChangeStart", persistScroll);
+    window.addEventListener("beforeunload", persistScroll);
+
+    return () => {
+      container.removeEventListener("scroll", persistScroll);
+      router.events.off("routeChangeStart", persistScroll);
+      window.removeEventListener("beforeunload", persistScroll);
+    };
+  }, [isMobile, router.events]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || isMobile) return;
+    const container = sidebarContentRef.current;
+    if (!container) return;
+
+    const activeItem = container.querySelector<HTMLElement>('[data-nav-active="true"]');
+    activeItem?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }, [currentPath, isMobile]);
 
   const NavItem = ({ item }: { item: NavItem }) => {
     if (item.children && !collapsed) {
@@ -125,6 +166,7 @@ export function AppSidebar() {
                 href={child.url}
                 scroll={false}
                 onClick={handleNavigate}
+                data-nav-active={isActive(child.url) ? "true" : undefined}
                 className={cn(
                   "block rounded-xl px-2.5 py-1.5 text-sm transition-all duration-200",
                   isActive(child.url)
@@ -147,6 +189,7 @@ export function AppSidebar() {
             href={item.url}
             scroll={false}
             onClick={handleNavigate}
+            data-nav-active={isGroupActive(item) ? "true" : undefined}
             className={cn(
               "flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all duration-200",
               "group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2",
@@ -174,14 +217,14 @@ export function AppSidebar() {
           </div>
           {!collapsed && (
             <div className="flex min-w-0 flex-col">
-              <span className="truncate font-semibold text-foreground">Zakatku Console</span>
-              <span className="truncate text-xs text-muted-foreground">Modern ZIS Operation</span>
+              <span className="truncate font-semibold text-foreground">AmanahZIS</span>
+              <span className="truncate text-xs text-muted-foreground">Platform Operasional ZIS Masjid</span>
             </div>
           )}
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="px-2.5 py-4">
+      <SidebarContent ref={sidebarContentRef} className="px-2.5 py-4">
         {/* Period Selector */}
         {!collapsed && (
           <div className="mb-4 rounded-2xl border border-sidebar-border/70 bg-background/55 p-2.5 shadow-sm">

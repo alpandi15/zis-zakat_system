@@ -83,6 +83,12 @@ interface CreatorProfile {
   email: string | null;
 }
 
+interface MuzakkiSelectionMeta {
+  source?: "existing" | "created";
+  recommendedFitrahCount?: number;
+  createdMemberIds?: string[];
+}
+
 // Default values (used as fallback if period config is missing)
 const DEFAULT_RICE_PER_PERSON_KG = 2.5;
 const DEFAULT_RICE_PRICE_PER_KG = 15000;
@@ -107,6 +113,9 @@ export default function ZakatFitrah() {
   const [correctionReason, setCorrectionReason] = useState("");
   const [selectedMuzakkiId, setSelectedMuzakkiId] = useState("");
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [useMemberSelection, setUseMemberSelection] = useState(false);
+  const [manualFitrahCount, setManualFitrahCount] = useState(1);
+  const [fallbackHeadMemberId, setFallbackHeadMemberId] = useState<string | null>(null);
   const [paymentType, setPaymentType] = useState<"rice" | "money">("rice");
   const [notes, setNotes] = useState("");
 
@@ -125,7 +134,7 @@ export default function ZakatFitrah() {
   // Use custom or period values
   const ricePerPerson = isOverrideRice ? customRicePerPerson : periodRicePerPerson;
   const cashPerPerson = isOverrideCash ? customCashPerPerson : periodCashPerPerson;
-  const totalMembersCount = selectedMembers.length;
+  const totalMembersCount = useMemberSelection ? selectedMembers.length : Math.max(1, manualFitrahCount || 1);
   const calculatedRiceTotal = totalMembersCount * ricePerPerson;
   const totalRiceAmount = isOverrideTotalRice ? customTotalRiceKg : calculatedRiceTotal;
   const effectiveRicePerPerson =
@@ -253,14 +262,20 @@ export default function ZakatFitrah() {
   // Create transaction mutation
   const createMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedPeriod?.id || selectedMembers.length === 0) {
+      if (!selectedPeriod?.id) {
+        throw new Error("Periode belum dipilih");
+      }
+      if (useMemberSelection && selectedMembers.length === 0) {
         throw new Error("Pilih minimal satu anggota");
+      }
+      if (!useMemberSelection && (!Number.isFinite(manualFitrahCount) || manualFitrahCount < 1)) {
+        throw new Error("Jumlah fitrah minimal 1 orang");
       }
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
-      const totalMembers = selectedMembers.length;
+      const totalMembers = useMemberSelection ? selectedMembers.length : Math.max(1, Math.floor(manualFitrahCount));
       const calculatedRiceAmount = totalMembers * ricePerPerson;
       const riceAmount =
         paymentType === "rice" ? (isOverrideTotalRice ? customTotalRiceKg : calculatedRiceAmount) : null;
@@ -270,13 +285,15 @@ export default function ZakatFitrah() {
           : null;
       const moneyAmount = paymentType === "money" ? totalMembers * cashPerPerson : null;
 
-      const items = selectedMembers.map(memberId => ({
-        transaction_id: "",
-        muzakki_member_id: memberId,
-        period_id: selectedPeriod.id,
-        rice_amount_kg: perMemberRiceAmount,
-        money_amount: paymentType === "money" ? cashPerPerson : null,
-      }));
+      const items = useMemberSelection
+        ? selectedMembers.map((memberId) => ({
+            transaction_id: "",
+            muzakki_member_id: memberId,
+            period_id: selectedPeriod.id,
+            rice_amount_kg: perMemberRiceAmount,
+            money_amount: paymentType === "money" ? cashPerPerson : null,
+          }))
+        : [];
       const category = paymentType === "rice" ? "zakat_fitrah_rice" : "zakat_fitrah_cash";
 
       if (editingTransaction) {
@@ -305,9 +322,11 @@ export default function ZakatFitrah() {
           .eq("transaction_id", editingTransaction.id);
         if (deleteItemsError) throw deleteItemsError;
 
-        const nextItems = items.map((item) => ({ ...item, transaction_id: editingTransaction.id }));
-        const { error: insertItemsError } = await supabase.from("zakat_fitrah_transaction_items").insert(nextItems);
-        if (insertItemsError) throw insertItemsError;
+        if (items.length > 0) {
+          const nextItems = items.map((item) => ({ ...item, transaction_id: editingTransaction.id }));
+          const { error: insertItemsError } = await supabase.from("zakat_fitrah_transaction_items").insert(nextItems);
+          if (insertItemsError) throw insertItemsError;
+        }
 
         const { data: existingLedger, error: ledgerLookupError } = await supabase
           .from("fund_ledger")
@@ -367,9 +386,11 @@ export default function ZakatFitrah() {
         .single();
       if (txError) throw txError;
 
-      const insertItems = items.map((item) => ({ ...item, transaction_id: transaction.id }));
-      const { error: itemsError } = await supabase.from("zakat_fitrah_transaction_items").insert(insertItems);
-      if (itemsError) throw itemsError;
+      if (items.length > 0) {
+        const insertItems = items.map((item) => ({ ...item, transaction_id: transaction.id }));
+        const { error: itemsError } = await supabase.from("zakat_fitrah_transaction_items").insert(insertItems);
+        if (itemsError) throw itemsError;
+      }
 
       const { error: ledgerError } = await supabase
         .from("fund_ledger")
@@ -404,6 +425,9 @@ export default function ZakatFitrah() {
     setEditingTransaction(null);
     setSelectedMuzakkiId("");
     setSelectedMembers([]);
+    setUseMemberSelection(false);
+    setManualFitrahCount(1);
+    setFallbackHeadMemberId(null);
     setPaymentType("rice");
     setNotes("");
     setIsOverrideRice(false);
@@ -575,7 +599,11 @@ export default function ZakatFitrah() {
       return;
     }
 
-    setSelectedMembers((items || []).map((item) => item.muzakki_member_id));
+    const itemIds = (items || []).map((item) => item.muzakki_member_id);
+    setSelectedMembers(itemIds);
+    setFallbackHeadMemberId(itemIds[0] || null);
+    setUseMemberSelection(itemIds.length > 0);
+    setManualFitrahCount(Math.max(1, tx.total_members || itemIds.length || 1));
     setIsFormOpen(true);
   };
 
@@ -602,8 +630,12 @@ export default function ZakatFitrah() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedMembers.length === 0) {
+    if (useMemberSelection && selectedMembers.length === 0) {
       toast({ variant: "destructive", title: "Pilih minimal satu anggota" });
+      return;
+    }
+    if (!useMemberSelection && (!Number.isFinite(manualFitrahCount) || manualFitrahCount < 1)) {
+      toast({ variant: "destructive", title: "Jumlah fitrah minimal 1 orang" });
       return;
     }
     createMutation.mutate();
@@ -682,20 +714,20 @@ export default function ZakatFitrah() {
                         {tx.is_void ? (
                           <Badge variant="destructive">Void</Badge>
                         ) : isTransactionLocked(tx) ? (
-                          <Badge variant="secondary">
+                          <Badge variant="secondary" className="!whitespace-nowrap">
                             Lock {tx.locked_batch?.batch_code || `#${tx.locked_batch?.batch_no || "-"}`}
                           </Badge>
                         ) : (
                           <Badge variant="outline">Editable</Badge>
                         )}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap">{tx.total_members} orang</TableCell>
-                      <TableCell className="whitespace-nowrap text-right">
+                      <TableCell className="!whitespace-nowrap">{tx.total_members} orang</TableCell>
+                      <TableCell className="!whitespace-nowrap text-right">
                         {tx.payment_type === "rice"
                           ? `${tx.rice_amount_kg} kg`
                           : formatCurrency(tx.money_amount || 0)}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground sm:text-sm">{getCreatorName(tx.created_by)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground sm:text-sm whitespace-nowrap">{getCreatorName(tx.created_by)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
                           <Button
@@ -760,13 +792,63 @@ export default function ZakatFitrah() {
               <Label>Muzakki *</Label>
               <MuzakkiSearchSelect
                 value={selectedMuzakkiId}
-                onChange={(v) => { setSelectedMuzakkiId(v); setSelectedMembers([]); }}
+                onChange={(v, meta?: MuzakkiSelectionMeta) => {
+                  setSelectedMuzakkiId(v);
+                  setSelectedMembers([]);
+                  setFallbackHeadMemberId(null);
+
+                  if (meta?.source === "created") {
+                    const nextCount = Math.max(1, meta.recommendedFitrahCount || 1);
+                    setManualFitrahCount(nextCount);
+                    setUseMemberSelection(false);
+
+                    const firstCreatedMember = meta.createdMemberIds?.[0] || null;
+                    setFallbackHeadMemberId(firstCreatedMember);
+                    if (firstCreatedMember && nextCount === 1) {
+                      setSelectedMembers([firstCreatedMember]);
+                    }
+                    return;
+                  }
+
+                  setManualFitrahCount(1);
+                }}
                 placeholder="Cari atau tambah muzakki..."
               />
             </div>
 
             {selectedMuzakkiId && (
               <div className="space-y-2">
+                <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+                  <div>
+                    <Label className="text-xs sm:text-sm">Input Berdasarkan Anggota</Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Nonaktif: cukup isi jumlah fitrah (orang), tanpa pilih anggota.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={useMemberSelection}
+                    onCheckedChange={(checked) => {
+                      setUseMemberSelection(checked);
+                      if (checked && selectedMembers.length === 0 && fallbackHeadMemberId) {
+                        setSelectedMembers([fallbackHeadMemberId]);
+                      }
+                    }}
+                  />
+                </div>
+
+                {!useMemberSelection ? (
+                  <div className="space-y-2 rounded-lg border p-3">
+                    <Label htmlFor="manualFitrahCount">Jumlah Fitrah (Orang) *</Label>
+                    <Input
+                      id="manualFitrahCount"
+                      type="number"
+                      min={1}
+                      value={manualFitrahCount}
+                      onChange={(e) => setManualFitrahCount(Math.max(1, Number(e.target.value) || 1))}
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <Label>Anggota yang Dizakati *</Label>
                   <Button type="button" variant="outline" size="sm" onClick={selectAllAvailable}>
@@ -800,6 +882,8 @@ export default function ZakatFitrah() {
                         )}
                       </div>
                     ))}
+                  </div>
+                )}
                   </div>
                 )}
               </div>
@@ -950,7 +1034,7 @@ export default function ZakatFitrah() {
               />
             </div>
 
-            {selectedMembers.length > 0 && (
+            {totalMembersCount > 0 && (
               <Card className="bg-muted/50">
                 <CardContent className="pt-4">
                   <div className="flex justify-between items-center">
@@ -975,7 +1059,14 @@ export default function ZakatFitrah() {
               <Button type="button" variant="outline" onClick={() => { resetForm(); setIsFormOpen(false); }}>
                 Batal
               </Button>
-              <Button type="submit" disabled={createMutation.isPending || selectedMembers.length === 0}>
+              <Button
+                type="submit"
+                disabled={
+                  createMutation.isPending ||
+                  totalMembersCount <= 0 ||
+                  (useMemberSelection && selectedMembers.length === 0)
+                }
+              >
                 {editingTransaction ? "Simpan Perubahan" : "Simpan Transaksi"}
               </Button>
             </div>

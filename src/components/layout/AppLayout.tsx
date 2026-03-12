@@ -86,7 +86,7 @@ export function AppLayout({ children, title }: AppLayoutProps) {
       <div className="relative flex min-h-[100dvh] w-full overflow-x-hidden bg-[radial-gradient(1200px_circle_at_100%_0%,hsl(var(--primary)/0.08),transparent_40%),radial-gradient(900px_circle_at_0%_100%,hsl(196_90%_45%/0.06),transparent_35%),hsl(var(--background))]">
         <AppSidebar />
         <main className="relative min-w-0 flex-1 overflow-x-hidden">
-          <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/60 bg-background/85 px-3 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60 sm:h-16 sm:gap-4 sm:px-6 lg:px-8">
+          <header className="fixed inset-x-0 top-0 z-[60] flex h-[calc(3.5rem+env(safe-area-inset-top))] items-center gap-3 border-b border-border/60 bg-background/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/70 sm:gap-4 sm:px-6 md:sticky md:inset-x-auto md:z-50 md:h-16 md:pt-0 lg:px-8">
             <SidebarTrigger className="-ml-1 h-8 w-8 rounded-full border border-border/60 bg-background/70" />
             {title && (
               <div className="min-w-0">
@@ -99,7 +99,7 @@ export function AppLayout({ children, title }: AppLayoutProps) {
               </div>
             )}
           </header>
-          <div className="px-3 py-3 sm:px-6 sm:py-6 lg:px-8">
+          <div className="px-3 pb-3 pt-[calc(3.5rem+env(safe-area-inset-top)+0.75rem)] sm:px-6 sm:pb-6 sm:pt-[calc(3.5rem+env(safe-area-inset-top)+1rem)] md:px-6 md:py-6 lg:px-8">
             <div className="mx-auto w-full max-w-[1600px] animate-fade-in">{children}</div>
           </div>
         </main>
