@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -164,7 +164,17 @@ export function MuzakkiSearchSelect({
         createdMemberIds = headMember?.id ? [headMember.id] : [];
       } else {
         // Option 2: keep existing detailed member flow
-        const validMembers = members.filter((m) => m.name.trim());
+        const normalizedMembers = members.map((member, index) =>
+          index === 0
+            ? {
+                ...member,
+                name: muzakkiData.name.trim(),
+                relationship: "head_of_family",
+                is_dependent: true,
+              }
+            : member,
+        );
+        const validMembers = normalizedMembers.filter((m) => m.name.trim());
         if (validMembers.length === 0) {
           throw new Error("Minimal satu anggota harus diisi");
         }
@@ -220,6 +230,21 @@ export function MuzakkiSearchSelect({
     setManualFitrahCount(1);
   };
 
+  useEffect(() => {
+    setMembers((prev) =>
+      prev.map((member, index) =>
+        index === 0
+          ? {
+              ...member,
+              name: muzakkiData.name,
+              relationship: "head_of_family",
+              is_dependent: true,
+            }
+          : member,
+      ),
+    );
+  }, [muzakkiData.name]);
+
   const handleOpenCreate = () => {
     setSearch("");
     setMuzakkiData((prev) => ({ ...prev, name: search }));
@@ -232,7 +257,8 @@ export function MuzakkiSearchSelect({
   };
 
   const removeMember = (id: string) => {
-    if (members.length > 1) {
+    const memberIndex = members.findIndex((member) => member.id === id);
+    if (memberIndex > 0 && members.length > 1) {
       setMembers(members.filter(m => m.id !== id));
     }
   };
@@ -263,7 +289,17 @@ export function MuzakkiSearchSelect({
       return;
     }
 
-    const validMembers = members.filter((m) => m.name.trim());
+    const normalizedMembers = members.map((member, index) =>
+      index === 0
+        ? {
+            ...member,
+            name: muzakkiData.name.trim(),
+            relationship: "head_of_family",
+            is_dependent: true,
+          }
+        : member,
+    );
+    const validMembers = normalizedMembers.filter((m) => m.name.trim());
     if (validMembers.length === 0) {
       toast({ variant: "destructive", title: "Minimal satu anggota harus diisi" });
       return;
@@ -427,7 +463,7 @@ export function MuzakkiSearchSelect({
                       <div key={member.id} className="space-y-2 rounded-xl border p-2.5 sm:p-3">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium sm:text-sm">Anggota {index + 1}</span>
-                          {members.length > 1 && (
+                          {index > 0 && members.length > 1 && (
                             <Button
                               type="button"
                               variant="ghost"
@@ -444,10 +480,12 @@ export function MuzakkiSearchSelect({
                             value={member.name}
                             onChange={(e) => updateMember(member.id, "name", e.target.value)}
                             placeholder="Nama"
+                            disabled={index === 0}
                           />
                           <Select
                             value={member.relationship}
                             onValueChange={(v) => updateMember(member.id, "relationship", v)}
+                            disabled={index === 0}
                           >
                             <SelectTrigger>
                               <SelectValue />
@@ -462,9 +500,17 @@ export function MuzakkiSearchSelect({
                           </Select>
                         </div>
                         <div className="flex items-center justify-between rounded-lg border px-2.5 py-2">
-                          <Label className="text-[11px] sm:text-xs">Termasuk Tanggungan</Label>
+                          <div>
+                            <Label className="text-[11px] sm:text-xs">Termasuk Tanggungan</Label>
+                            {index === 0 && (
+                              <p className="text-[10px] text-muted-foreground sm:text-[11px]">
+                                Kepala keluarga wajib tercatat sebagai anggota utama.
+                              </p>
+                            )}
+                          </div>
                           <Switch
                             checked={member.is_dependent}
+                            disabled={index === 0}
                             onCheckedChange={(checked) =>
                               setMembers((prev) =>
                                 prev.map((m) => (m.id === member.id ? { ...m, is_dependent: checked } : m)),

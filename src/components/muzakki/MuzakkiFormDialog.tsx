@@ -114,6 +114,23 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
     resetForm();
   }, [open, editingMuzakki]);
 
+  useEffect(() => {
+    if (isEditing) return;
+
+    setMembers((prev) =>
+      prev.map((member, index) =>
+        index === 0
+          ? {
+              ...member,
+              name: muzakkiData.name,
+              relationship: "head_of_family",
+              is_dependent: true,
+            }
+          : member,
+      ),
+    );
+  }, [isEditing, muzakkiData.name]);
+
   const handleOpenChange = (open: boolean) => {
     if (!open) {
       resetForm();
@@ -140,7 +157,17 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
       if (muzakkiError) throw muzakkiError;
 
       // Then create all members
-      const validMembers = members.filter((m) => m.name.trim());
+      const normalizedMembers = members.map((member, index) =>
+        index === 0
+          ? {
+              ...member,
+              name: muzakkiData.name.trim(),
+              relationship: "head_of_family",
+              is_dependent: true,
+            }
+          : member,
+      );
+      const validMembers = normalizedMembers.filter((m) => m.name.trim());
       if (validMembers.length > 0) {
         const { error: membersError } = await supabase.from("muzakki_members").insert(
           validMembers.map((m) => ({
@@ -208,7 +235,8 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
   };
 
   const removeMember = (id: string) => {
-    if (members.length > 1) {
+    const memberIndex = members.findIndex((member) => member.id === id);
+    if (memberIndex > 0 && members.length > 1) {
       setMembers(members.filter((m) => m.id !== id));
     }
   };
@@ -233,7 +261,17 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
       updateMutation.mutate();
     } else {
       // Validate at least one member with name
-      const validMembers = members.filter((m) => m.name.trim());
+      const normalizedMembers = members.map((member, index) =>
+        index === 0
+          ? {
+              ...member,
+              name: muzakkiData.name.trim(),
+              relationship: "head_of_family",
+              is_dependent: true,
+            }
+          : member,
+      );
+      const validMembers = normalizedMembers.filter((m) => m.name.trim());
       if (validMembers.length === 0) {
         toast({ variant: "destructive", title: "Minimal satu anggota harus diisi" });
         return;
@@ -339,7 +377,7 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
                 <div key={member.id} className="border rounded-lg p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-sm">Anggota {index + 1}</span>
-                    {members.length > 1 && (
+                    {index > 0 && members.length > 1 && (
                       <Button
                         type="button"
                         variant="ghost"
@@ -358,6 +396,7 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
                         value={member.name}
                         onChange={(e) => updateMember(member.id, "name", e.target.value)}
                         placeholder="Nama anggota"
+                        disabled={index === 0}
                       />
                     </div>
                     <div className="space-y-1">
@@ -365,6 +404,7 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
                       <Select
                         value={member.relationship}
                         onValueChange={(value) => updateMember(member.id, "relationship", value)}
+                        disabled={index === 0}
                       >
                         <SelectTrigger>
                           <SelectValue />
@@ -398,11 +438,14 @@ export function MuzakkiFormDialog({ open, onOpenChange, editingMuzakki }: Muzakk
                       <div>
                         <Label className="text-xs">Termasuk Tanggungan Zakat</Label>
                         <p className="text-xs text-muted-foreground">
-                          Anggota ini akan muncul pada transaksi Zakat Fitrah.
+                          {index === 0
+                            ? "Kepala keluarga wajib tercatat dan dikunci sebagai anggota utama."
+                            : "Anggota ini akan muncul pada transaksi Zakat Fitrah."}
                         </p>
                       </div>
                       <Switch
                         checked={member.is_dependent}
+                        disabled={index === 0}
                         onCheckedChange={(checked) =>
                           setMembers((prev) =>
                             prev.map((m) =>

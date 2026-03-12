@@ -41,15 +41,18 @@ interface ZakatFitrahTx {
   muzakki_id: string | null;
   money_amount: number | null;
   rice_amount_kg: number | null;
+  total_members: number | null;
   transaction_date: string;
 }
 
 interface ZakatMalTx {
+  muzakki_id: string | null;
   final_zakat_amount: number | null;
   transaction_date: string;
 }
 
 interface FidyahTx {
+  payer_muzakki_id: string | null;
   cash_amount: number | null;
   food_amount_kg: number | null;
   transaction_date: string;
@@ -120,15 +123,15 @@ function usePublicDashboardData() {
         supabase.rpc("get_all_fund_balances", { _period_id: period.id }),
         supabase
           .from("zakat_fitrah_transactions")
-          .select("muzakki_id, money_amount, rice_amount_kg, transaction_date")
+          .select("muzakki_id, money_amount, rice_amount_kg, total_members, transaction_date")
           .eq("period_id", period.id),
         supabase
           .from("zakat_mal_transactions")
-          .select("final_zakat_amount, transaction_date")
+          .select("muzakki_id, final_zakat_amount, transaction_date")
           .eq("period_id", period.id),
         supabase
           .from("fidyah_transactions")
-          .select("cash_amount, food_amount_kg, transaction_date")
+          .select("payer_muzakki_id, cash_amount, food_amount_kg, transaction_date")
           .eq("period_id", period.id),
         supabase
           .from("zakat_distributions")
@@ -188,17 +191,28 @@ function usePublicDashboardData() {
           allReceiptTimes[0])
         : null;
 
-      const totalMuzakki = new Set(
-        fitrahTransactions
-          .map((tx) => tx.muzakki_id)
-          .filter((id): id is string => Boolean(id)),
-      ).size;
+      const householdIds = new Set<string>();
+      fitrahTransactions.forEach((tx) => {
+        if (tx.muzakki_id) householdIds.add(tx.muzakki_id);
+      });
+      malTransactions.forEach((tx) => {
+        if (tx.muzakki_id) householdIds.add(tx.muzakki_id);
+      });
+      fidyahTransactions.forEach((tx) => {
+        if (tx.payer_muzakki_id) householdIds.add(tx.payer_muzakki_id);
+      });
+
+      const totalJiwaFitrah = fitrahTransactions.reduce(
+        (sum, tx) => sum + Math.max(1, Number(tx.total_members) || 0),
+        0,
+      );
 
       return {
         period,
         received,
         balances: balancesByCategory,
-        totalMuzakki,
+        totalMuzakkiHouseholds: householdIds.size,
+        totalJiwaFitrah,
         totalTransactions: fitrahTransactions.length + malTransactions.length + fidyahTransactions.length,
         totalDistributions: (zakatDistRes.count || 0) + (fidyahDistRes.count || 0),
         receiptWindow: {
@@ -355,12 +369,12 @@ export default function PublicTVDashboard() {
           </div>
         </header>
 
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <Card className="animate-in fade-in slide-in-from-bottom-2 duration-700 border-emerald-500/30 bg-emerald-500/10 text-slate-100 backdrop-blur">
             <CardContent className="p-4 md:p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs text-emerald-200 md:text-sm">Total Penerimaan Kas</p>
+                  <p className="text-xs text-emerald-200 md:text-sm">Total Uang Gabungan</p>
                   <p className="mt-1 text-xl font-semibold text-white md:text-3xl">{formatCurrency(totalReceivedCash)}</p>
                 </div>
                 <div className="rounded-xl bg-emerald-400/20 p-2.5 md:p-3">
@@ -388,11 +402,29 @@ export default function PublicTVDashboard() {
             <CardContent className="p-4 md:p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs text-sky-200 md:text-sm">Total Muzakki</p>
-                  <p className="mt-1 text-xl font-semibold text-white md:text-3xl">{data.totalMuzakki.toLocaleString("id-ID")}</p>
+                  <p className="text-xs text-sky-200 md:text-sm">Muzakki Kepala Keluarga</p>
+                  <p className="mt-1 text-xl font-semibold text-white md:text-3xl">
+                    {data.totalMuzakkiHouseholds.toLocaleString("id-ID")}
+                  </p>
                 </div>
                 <div className="rounded-xl bg-sky-400/20 p-2.5 md:p-3">
                   <Users className="h-5 w-5 text-sky-200 md:h-7 md:w-7" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="animate-in fade-in slide-in-from-bottom-2 duration-700 border-cyan-500/30 bg-cyan-500/10 text-slate-100 backdrop-blur">
+            <CardContent className="p-4 md:p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs text-cyan-200 md:text-sm">Muzakki Jiwa/Fitrah</p>
+                  <p className="mt-1 text-xl font-semibold text-white md:text-3xl">
+                    {data.totalJiwaFitrah.toLocaleString("id-ID")}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-cyan-400/20 p-2.5 md:p-3">
+                  <Activity className="h-5 w-5 text-cyan-200 md:h-7 md:w-7" />
                 </div>
               </div>
             </CardContent>
