@@ -216,18 +216,19 @@ export default function AdminMembers() {
       };
 
       const ensureUserVisibleInAdminList = async (createdUserId: string) => {
-        // Best effort profile sync (only updates existing row via RLS policy).
-        const { error: profileUpdateError } = await supabase
+        // Ensure profile row exists even when auth trigger is delayed/missing.
+        const { error: profileUpsertError } = await supabase
           .from("profiles")
-          .update({
+          .upsert({
+            id: createdUserId,
             email,
             full_name,
+            created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-          })
-          .eq("id", createdUserId);
+          }, { onConflict: "id" });
 
-        if (profileUpdateError) {
-          console.warn("Profile update after create-user failed:", profileUpdateError.message);
+        if (profileUpsertError) {
+          console.warn("Profile upsert after create-user failed:", profileUpsertError.message);
         }
 
         // Make role assignment deterministic (including viewer), so the user
