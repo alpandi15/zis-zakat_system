@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
+import { MASJID_ADDRESS, MASJID_NAME } from "@/lib/masjidProfile";
 
 export interface ExportColumn {
   header: string;
@@ -35,17 +36,35 @@ const toWorksheetCell = (value: unknown): WorksheetCell => {
 
 export function exportToPDF(data: ExportData, filename: string) {
   const doc = new jsPDF();
+  let currentY = 20;
 
   // Title
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(data.title, 14, 20);
+  doc.text(data.title, 14, currentY);
+  currentY += 8;
+
+  if (MASJID_NAME) {
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text(MASJID_NAME, 14, currentY);
+    currentY += 6;
+  }
+
+  if (MASJID_ADDRESS) {
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    const addressLines = doc.splitTextToSize(MASJID_ADDRESS, 180);
+    doc.text(addressLines, 14, currentY);
+    currentY += addressLines.length * 5;
+  }
 
   // Subtitle
   if (data.subtitle) {
     doc.setFontSize(12);
     doc.setFont("helvetica", "normal");
-    doc.text(data.subtitle, 14, 28);
+    doc.text(data.subtitle, 14, currentY);
+    currentY += 7;
   }
 
   // Table
@@ -58,7 +77,7 @@ export function exportToPDF(data: ExportData, filename: string) {
   autoTable(doc, {
     head: [data.columns.map((col) => col.header)],
     body: tableData,
-    startY: data.subtitle ? 35 : 28,
+    startY: currentY + 2,
     styles: {
       fontSize: 9,
       cellPadding: 3,
@@ -112,6 +131,12 @@ export function exportToExcel(data: ExportData, filename: string) {
 
   // Title row
   wsData.push([data.title]);
+  if (MASJID_NAME) {
+    wsData.push([MASJID_NAME]);
+  }
+  if (MASJID_ADDRESS) {
+    wsData.push([MASJID_ADDRESS]);
+  }
   if (data.subtitle) {
     wsData.push([data.subtitle]);
   }

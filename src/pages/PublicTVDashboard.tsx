@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MASJID_ADDRESS, MASJID_NAME } from "@/lib/masjidProfile";
 import {
   Activity,
   Banknote,
@@ -335,7 +336,10 @@ export default function PublicTVDashboard() {
                 <Users className="mr-1 h-3 w-3" />
                 Sedang Menonton: {watchingCount.toLocaleString("id-ID")}
               </Badge>
-              <h1 className="text-2xl font-semibold tracking-tight md:text-4xl">Papan Informasi Zakat Masjid</h1>
+              <h1 className="text-2xl font-semibold tracking-tight md:text-4xl">{MASJID_NAME}</h1>
+              <p className="text-sm text-cyan-100/90 md:text-base">
+                {MASJID_ADDRESS}
+              </p>
               <p className="text-sm text-slate-300 md:text-lg">
                 Periode {data.period.name} ({data.period.hijri_year} H / {data.period.gregorian_year} M)
               </p>

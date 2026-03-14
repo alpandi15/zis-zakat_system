@@ -385,7 +385,7 @@ export default function Periods() {
                       )}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
+                  <PopoverContent portalled={false} className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
                       selected={parseDateValue(formData.start_date)}
@@ -416,7 +416,7 @@ export default function Periods() {
                       )}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
+                  <PopoverContent portalled={false} className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
                       selected={parseDateValue(formData.end_date)}
