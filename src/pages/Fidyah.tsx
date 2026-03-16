@@ -552,7 +552,7 @@ export default function FidyahPage() {
                         {tx.transaction_no ? `FD-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
-                        {format(new Date(tx.transaction_date), "dd MMM yyyy", { locale: idLocale })}
+                        {format(new Date(tx.transaction_date), "dd MMM yyyy, HH.mm", { locale: idLocale })}
                       </TableCell>
                       <TableCell>
                         <p className="font-medium">{tx.payer_name}</p>

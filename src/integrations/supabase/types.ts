@@ -565,6 +565,7 @@ export type Database = {
           notes: string | null
           phone: string | null
           priority: Database["public"]["Enums"]["priority_level"]
+          tags: string[]
           updated_at: string
         }
         Insert: {
@@ -584,6 +585,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           priority?: Database["public"]["Enums"]["priority_level"]
+          tags?: string[]
           updated_at?: string
         }
         Update: {
@@ -603,6 +605,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           priority?: Database["public"]["Enums"]["priority_level"]
+          tags?: string[]
           updated_at?: string
         }
         Relationships: [

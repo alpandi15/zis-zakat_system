@@ -24,6 +24,7 @@ interface DataTableProps<T> {
   data: T[];
   columns: Column<T>[];
   toolbarExtra?: ReactNode;
+  headerActions?: ReactNode;
   searchPlaceholder?: string;
   searchKey?: keyof T;
   onAdd?: () => void;
@@ -41,6 +42,7 @@ export function DataTable<T extends { id: string }>({
   data,
   columns,
   toolbarExtra,
+  headerActions,
   searchPlaceholder = "Cari...",
   searchKey,
   onAdd,
@@ -71,38 +73,42 @@ export function DataTable<T extends { id: string }>({
             Menampilkan {filteredData.length} dari {data.length} data
           </p>
         </div>
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-          {toolbarExtra}
-          {searchKey && (
-            <div className="relative w-full sm:w-auto">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder={searchPlaceholder}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-8 w-full pl-9 text-xs sm:h-9 sm:w-[220px] sm:text-sm"
-              />
-            </div>
-          )}
-          {onExportPDF && (
-            <Button variant="outline" size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onExportPDF}>
-              <FileText className="mr-2 h-4 w-4" />
-              PDF
-            </Button>
-          )}
-          {onExportExcel && (
-            <Button variant="outline" size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onExportExcel}>
-              <FileSpreadsheet className="mr-2 h-4 w-4" />
-              Excel
-            </Button>
-          )}
-          {onAdd && !isReadOnly && (
-            <Button size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onAdd}>
-              <Plus className="mr-2 h-4 w-4" />
-              {addLabel}
-            </Button>
-          )}
-        </div>
+        {headerActions ? (
+          <div className="w-full lg:w-auto">{headerActions}</div>
+        ) : (
+          <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+            {toolbarExtra}
+            {searchKey && (
+              <div className="relative w-full sm:w-auto">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder={searchPlaceholder}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-8 w-full pl-9 text-xs sm:h-9 sm:w-[220px] sm:text-sm"
+                />
+              </div>
+            )}
+            {onExportPDF && (
+              <Button variant="outline" size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onExportPDF}>
+                <FileText className="mr-2 h-4 w-4" />
+                PDF
+              </Button>
+            )}
+            {onExportExcel && (
+              <Button variant="outline" size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onExportExcel}>
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                Excel
+              </Button>
+            )}
+            {onAdd && !isReadOnly && (
+              <Button size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onAdd}>
+                <Plus className="mr-2 h-4 w-4" />
+                {addLabel}
+              </Button>
+            )}
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         {isLoading ? (

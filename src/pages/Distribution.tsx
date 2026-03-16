@@ -123,6 +123,48 @@ interface PackagingAsnafSummary {
   fidyahCash: number;
 }
 
+interface PackagingGroupSummary {
+  recipientCount: number;
+  totalCash: number;
+  totalRiceKg: number;
+  totalFoodKg: number;
+  zakatFitrahCash: number;
+  zakatMalCash: number;
+  fidyahCash: number;
+  averageCashPerRecipient: number;
+  averageRicePerRecipient: number;
+  averageFoodPerRecipient: number;
+}
+
+interface PackagingSummary {
+  recipients: PackagingRecipientSummary[];
+  asnafGroups: PackagingAsnafSummary[];
+  groupBreakdown: {
+    amil: PackagingGroupSummary;
+    nonAmil: PackagingGroupSummary;
+  };
+  totals: {
+    totalCash: number;
+    totalRiceKg: number;
+    totalFoodKg: number;
+    zakatFitrahCash: number;
+    zakatMalCash: number;
+    fidyahCash: number;
+  };
+}
+
+interface PackagingSourceItem {
+  mustahikId: string;
+  fundCategory: FundCategory;
+  cashAmount: number;
+  riceAmountKg: number;
+  foodAmountKg: number;
+  isAmil: boolean;
+  asnafCode: string;
+  priority: string;
+  name?: string;
+}
+
 type DistributionTab = "distribution" | "assignment";
 type FundCategory = Enums<"fund_category">;
 type DistributionStatus = Enums<"distribution_status">;
@@ -139,6 +181,188 @@ const BATCH_STATUS_LABELS: Record<string, string> = {
   locked: "Terkunci",
   distributed: "Sudah Disalurkan",
   cancelled: "Dibatalkan",
+};
+
+const createEmptyPackagingGroupSummary = (): PackagingGroupSummary => ({
+  recipientCount: 0,
+  totalCash: 0,
+  totalRiceKg: 0,
+  totalFoodKg: 0,
+  zakatFitrahCash: 0,
+  zakatMalCash: 0,
+  fidyahCash: 0,
+  averageCashPerRecipient: 0,
+  averageRicePerRecipient: 0,
+  averageFoodPerRecipient: 0,
+});
+
+const createEmptyPackagingSummary = (): PackagingSummary => ({
+  recipients: [],
+  asnafGroups: [],
+  groupBreakdown: {
+    amil: createEmptyPackagingGroupSummary(),
+    nonAmil: createEmptyPackagingGroupSummary(),
+  },
+  totals: {
+    totalCash: 0,
+    totalRiceKg: 0,
+    totalFoodKg: 0,
+    zakatFitrahCash: 0,
+    zakatMalCash: 0,
+    fidyahCash: 0,
+  },
+});
+
+const buildPackagingSummary = (
+  items: PackagingSourceItem[],
+  mustahikMetaMap: Map<string, { name: string; asnafCode: string; priority: string }>,
+): PackagingSummary => {
+  if (items.length === 0) return createEmptyPackagingSummary();
+
+  const recipientMap = new Map<string, PackagingRecipientSummary>();
+
+  items.forEach((item) => {
+    const meta = mustahikMetaMap.get(item.mustahikId);
+    const current =
+      recipientMap.get(item.mustahikId) ||
+      ({
+        mustahikId: item.mustahikId,
+        name: item.name || meta?.name || "Mustahik",
+        asnafCode: item.asnafCode || meta?.asnafCode || "",
+        priority: String(item.priority || meta?.priority || "medium"),
+        isAmil: Boolean(item.isAmil || (item.asnafCode || meta?.asnafCode || "") === "amil"),
+        totalCash: 0,
+        totalRiceKg: 0,
+        totalFoodKg: 0,
+        zakatFitrahCash: 0,
+        zakatMalCash: 0,
+        fidyahCash: 0,
+      } as PackagingRecipientSummary);
+
+    current.totalCash += Number(item.cashAmount || 0);
+    current.totalRiceKg += Number(item.riceAmountKg || 0);
+    current.totalFoodKg += Number(item.foodAmountKg || 0);
+
+    if (item.fundCategory === "zakat_fitrah_cash") current.zakatFitrahCash += Number(item.cashAmount || 0);
+    if (item.fundCategory === "zakat_mal") current.zakatMalCash += Number(item.cashAmount || 0);
+    if (item.fundCategory === "fidyah_cash") current.fidyahCash += Number(item.cashAmount || 0);
+    if (item.isAmil) current.isAmil = true;
+
+    recipientMap.set(item.mustahikId, current);
+  });
+
+  const recipients = Array.from(recipientMap.values()).sort(
+    (a, b) => a.asnafCode.localeCompare(b.asnafCode) || a.name.localeCompare(b.name),
+  );
+
+  const asnafMap = new Map<string, PackagingAsnafSummary>();
+  recipients.forEach((recipient) => {
+    const key = recipient.asnafCode || "lainnya";
+    const current =
+      asnafMap.get(key) ||
+      ({
+        asnafCode: key,
+        recipientCount: 0,
+        totalCash: 0,
+        totalRiceKg: 0,
+        totalFoodKg: 0,
+        zakatFitrahCash: 0,
+        zakatMalCash: 0,
+        fidyahCash: 0,
+      } as PackagingAsnafSummary);
+
+    current.recipientCount += 1;
+    current.totalCash += recipient.totalCash;
+    current.totalRiceKg += recipient.totalRiceKg;
+    current.totalFoodKg += recipient.totalFoodKg;
+    current.zakatFitrahCash += recipient.zakatFitrahCash;
+    current.zakatMalCash += recipient.zakatMalCash;
+    current.fidyahCash += recipient.fidyahCash;
+    asnafMap.set(key, current);
+  });
+
+  const asnafGroups = Array.from(asnafMap.values()).sort((a, b) => a.asnafCode.localeCompare(b.asnafCode));
+
+  const groupAccumulator = {
+    amil: {
+      recipientCount: 0,
+      totalCash: 0,
+      totalRiceKg: 0,
+      totalFoodKg: 0,
+      zakatFitrahCash: 0,
+      zakatMalCash: 0,
+      fidyahCash: 0,
+    },
+    nonAmil: {
+      recipientCount: 0,
+      totalCash: 0,
+      totalRiceKg: 0,
+      totalFoodKg: 0,
+      zakatFitrahCash: 0,
+      zakatMalCash: 0,
+      fidyahCash: 0,
+    },
+  };
+
+  recipients.forEach((recipient) => {
+    const key = recipient.isAmil ? "amil" : "nonAmil";
+    groupAccumulator[key].recipientCount += 1;
+    groupAccumulator[key].totalCash += recipient.totalCash;
+    groupAccumulator[key].totalRiceKg += recipient.totalRiceKg;
+    groupAccumulator[key].totalFoodKg += recipient.totalFoodKg;
+    groupAccumulator[key].zakatFitrahCash += recipient.zakatFitrahCash;
+    groupAccumulator[key].zakatMalCash += recipient.zakatMalCash;
+    groupAccumulator[key].fidyahCash += recipient.fidyahCash;
+  });
+
+  const groupBreakdown = {
+    amil: {
+      ...groupAccumulator.amil,
+      averageCashPerRecipient:
+        groupAccumulator.amil.recipientCount > 0 ? groupAccumulator.amil.totalCash / groupAccumulator.amil.recipientCount : 0,
+      averageRicePerRecipient:
+        groupAccumulator.amil.recipientCount > 0 ? groupAccumulator.amil.totalRiceKg / groupAccumulator.amil.recipientCount : 0,
+      averageFoodPerRecipient:
+        groupAccumulator.amil.recipientCount > 0 ? groupAccumulator.amil.totalFoodKg / groupAccumulator.amil.recipientCount : 0,
+    },
+    nonAmil: {
+      ...groupAccumulator.nonAmil,
+      averageCashPerRecipient:
+        groupAccumulator.nonAmil.recipientCount > 0
+          ? groupAccumulator.nonAmil.totalCash / groupAccumulator.nonAmil.recipientCount
+          : 0,
+      averageRicePerRecipient:
+        groupAccumulator.nonAmil.recipientCount > 0
+          ? groupAccumulator.nonAmil.totalRiceKg / groupAccumulator.nonAmil.recipientCount
+          : 0,
+      averageFoodPerRecipient:
+        groupAccumulator.nonAmil.recipientCount > 0
+          ? groupAccumulator.nonAmil.totalFoodKg / groupAccumulator.nonAmil.recipientCount
+          : 0,
+    },
+  };
+
+  const totals = recipients.reduce(
+    (acc, recipient) => {
+      acc.totalCash += recipient.totalCash;
+      acc.totalRiceKg += recipient.totalRiceKg;
+      acc.totalFoodKg += recipient.totalFoodKg;
+      acc.zakatFitrahCash += recipient.zakatFitrahCash;
+      acc.zakatMalCash += recipient.zakatMalCash;
+      acc.fidyahCash += recipient.fidyahCash;
+      return acc;
+    },
+    {
+      totalCash: 0,
+      totalRiceKg: 0,
+      totalFoodKg: 0,
+      zakatFitrahCash: 0,
+      zakatMalCash: 0,
+      fidyahCash: 0,
+    },
+  );
+
+  return { recipients, asnafGroups, groupBreakdown, totals };
 };
 
 export default function Distribution() {
@@ -325,6 +549,11 @@ export default function Distribution() {
     amilDistributionMode,
     amilShareFactor,
   });
+
+  const mustahikMetaMap = useMemo(
+    () => new Map(mustahikList.map((m) => [m.id, { name: m.name, asnafCode: m.asnaf_settings?.asnaf_code || "", priority: m.priority }])),
+    [mustahikList],
+  );
 
   const getBalance = (category: FundCategory) => {
     const balance = fundBalances.find((b) => b.category === category);
@@ -597,205 +826,22 @@ export default function Distribution() {
 
   const packagingSummary = useMemo(() => {
     if (!selectedBatch || selectedBatchItems.length === 0) {
-      return {
-        recipients: [] as PackagingRecipientSummary[],
-        asnafGroups: [] as PackagingAsnafSummary[],
-        groupBreakdown: {
-          amil: {
-            recipientCount: 0,
-            totalCash: 0,
-            totalRiceKg: 0,
-            totalFoodKg: 0,
-            zakatFitrahCash: 0,
-            zakatMalCash: 0,
-            fidyahCash: 0,
-            averageCashPerRecipient: 0,
-            averageRicePerRecipient: 0,
-            averageFoodPerRecipient: 0,
-          },
-          nonAmil: {
-            recipientCount: 0,
-            totalCash: 0,
-            totalRiceKg: 0,
-            totalFoodKg: 0,
-            zakatFitrahCash: 0,
-            zakatMalCash: 0,
-            fidyahCash: 0,
-            averageCashPerRecipient: 0,
-            averageRicePerRecipient: 0,
-            averageFoodPerRecipient: 0,
-          },
-        },
-        totals: {
-          totalCash: 0,
-          totalRiceKg: 0,
-          totalFoodKg: 0,
-          zakatFitrahCash: 0,
-          zakatMalCash: 0,
-          fidyahCash: 0,
-        },
-      };
+      return createEmptyPackagingSummary();
     }
 
-    const mustahikMetaMap = new Map(
-      mustahikList.map((m) => [m.id, { name: m.name, asnafCode: m.asnaf_settings?.asnaf_code || "", priority: m.priority }]),
-    );
+    const batchPackagingItems: PackagingSourceItem[] = selectedBatchItems.map((item) => ({
+      mustahikId: item.mustahik_id,
+      fundCategory: item.fund_category,
+      cashAmount: Number(item.cash_amount || 0),
+      riceAmountKg: Number(item.rice_amount_kg || 0),
+      foodAmountKg: Number(item.food_amount_kg || 0),
+      isAmil: Boolean(item.is_amil),
+      asnafCode: item.asnaf_code || "",
+      priority: String(item.priority || "medium"),
+    }));
 
-    const recipientMap = new Map<string, PackagingRecipientSummary>();
-
-    selectedBatchItems.forEach((item) => {
-      const meta = mustahikMetaMap.get(item.mustahik_id);
-      const current =
-        recipientMap.get(item.mustahik_id) ||
-        ({
-          mustahikId: item.mustahik_id,
-          name: meta?.name || "Mustahik",
-          asnafCode: item.asnaf_code || meta?.asnafCode || "",
-          priority: String(item.priority || meta?.priority || "medium"),
-          isAmil: Boolean(item.is_amil || (item.asnaf_code || meta?.asnafCode || "") === "amil"),
-          totalCash: 0,
-          totalRiceKg: 0,
-          totalFoodKg: 0,
-          zakatFitrahCash: 0,
-          zakatMalCash: 0,
-          fidyahCash: 0,
-        } as PackagingRecipientSummary);
-
-      const cash = Number(item.cash_amount || 0);
-      const rice = Number(item.rice_amount_kg || 0);
-      const food = Number(item.food_amount_kg || 0);
-
-      current.totalCash += cash;
-      current.totalRiceKg += rice;
-      current.totalFoodKg += food;
-
-      if (item.fund_category === "zakat_fitrah_cash") current.zakatFitrahCash += cash;
-      if (item.fund_category === "zakat_mal") current.zakatMalCash += cash;
-      if (item.fund_category === "fidyah_cash") current.fidyahCash += cash;
-      if (item.is_amil) current.isAmil = true;
-
-      recipientMap.set(item.mustahik_id, current);
-    });
-
-    const recipients = Array.from(recipientMap.values()).sort(
-      (a, b) => a.asnafCode.localeCompare(b.asnafCode) || a.name.localeCompare(b.name),
-    );
-
-    const asnafMap = new Map<string, PackagingAsnafSummary>();
-    recipients.forEach((recipient) => {
-      const key = recipient.asnafCode || "lainnya";
-      const current =
-        asnafMap.get(key) ||
-        ({
-          asnafCode: key,
-          recipientCount: 0,
-          totalCash: 0,
-          totalRiceKg: 0,
-          totalFoodKg: 0,
-          zakatFitrahCash: 0,
-          zakatMalCash: 0,
-          fidyahCash: 0,
-        } as PackagingAsnafSummary);
-
-      current.recipientCount += 1;
-      current.totalCash += recipient.totalCash;
-      current.totalRiceKg += recipient.totalRiceKg;
-      current.totalFoodKg += recipient.totalFoodKg;
-      current.zakatFitrahCash += recipient.zakatFitrahCash;
-      current.zakatMalCash += recipient.zakatMalCash;
-      current.fidyahCash += recipient.fidyahCash;
-      asnafMap.set(key, current);
-    });
-
-    const asnafGroups = Array.from(asnafMap.values()).sort((a, b) => a.asnafCode.localeCompare(b.asnafCode));
-
-    const groupAccumulator = {
-      amil: {
-        recipientCount: 0,
-        totalCash: 0,
-        totalRiceKg: 0,
-        totalFoodKg: 0,
-        zakatFitrahCash: 0,
-        zakatMalCash: 0,
-        fidyahCash: 0,
-      },
-      nonAmil: {
-        recipientCount: 0,
-        totalCash: 0,
-        totalRiceKg: 0,
-        totalFoodKg: 0,
-        zakatFitrahCash: 0,
-        zakatMalCash: 0,
-        fidyahCash: 0,
-      },
-    };
-
-    recipients.forEach((recipient) => {
-      const key = recipient.isAmil ? "amil" : "nonAmil";
-      groupAccumulator[key].recipientCount += 1;
-      groupAccumulator[key].totalCash += recipient.totalCash;
-      groupAccumulator[key].totalRiceKg += recipient.totalRiceKg;
-      groupAccumulator[key].totalFoodKg += recipient.totalFoodKg;
-      groupAccumulator[key].zakatFitrahCash += recipient.zakatFitrahCash;
-      groupAccumulator[key].zakatMalCash += recipient.zakatMalCash;
-      groupAccumulator[key].fidyahCash += recipient.fidyahCash;
-    });
-
-    const groupBreakdown = {
-      amil: {
-        ...groupAccumulator.amil,
-        averageCashPerRecipient:
-          groupAccumulator.amil.recipientCount > 0
-            ? groupAccumulator.amil.totalCash / groupAccumulator.amil.recipientCount
-            : 0,
-        averageRicePerRecipient:
-          groupAccumulator.amil.recipientCount > 0
-            ? groupAccumulator.amil.totalRiceKg / groupAccumulator.amil.recipientCount
-            : 0,
-        averageFoodPerRecipient:
-          groupAccumulator.amil.recipientCount > 0
-            ? groupAccumulator.amil.totalFoodKg / groupAccumulator.amil.recipientCount
-            : 0,
-      },
-      nonAmil: {
-        ...groupAccumulator.nonAmil,
-        averageCashPerRecipient:
-          groupAccumulator.nonAmil.recipientCount > 0
-            ? groupAccumulator.nonAmil.totalCash / groupAccumulator.nonAmil.recipientCount
-            : 0,
-        averageRicePerRecipient:
-          groupAccumulator.nonAmil.recipientCount > 0
-            ? groupAccumulator.nonAmil.totalRiceKg / groupAccumulator.nonAmil.recipientCount
-            : 0,
-        averageFoodPerRecipient:
-          groupAccumulator.nonAmil.recipientCount > 0
-            ? groupAccumulator.nonAmil.totalFoodKg / groupAccumulator.nonAmil.recipientCount
-            : 0,
-      },
-    };
-
-    const totals = recipients.reduce(
-      (acc, recipient) => {
-        acc.totalCash += recipient.totalCash;
-        acc.totalRiceKg += recipient.totalRiceKg;
-        acc.totalFoodKg += recipient.totalFoodKg;
-        acc.zakatFitrahCash += recipient.zakatFitrahCash;
-        acc.zakatMalCash += recipient.zakatMalCash;
-        acc.fidyahCash += recipient.fidyahCash;
-        return acc;
-      },
-      {
-        totalCash: 0,
-        totalRiceKg: 0,
-        totalFoodKg: 0,
-        zakatFitrahCash: 0,
-        zakatMalCash: 0,
-        fidyahCash: 0,
-      },
-    );
-
-    return { recipients, asnafGroups, groupBreakdown, totals };
-  }, [selectedBatch, selectedBatchItems, mustahikList]);
+    return buildPackagingSummary(batchPackagingItems, mustahikMetaMap);
+  }, [selectedBatch, selectedBatchItems, mustahikMetaMap]);
 
   const renderDistributionTable = () => (
     <Table>
@@ -1088,12 +1134,10 @@ export default function Distribution() {
       <Dialog open={isPackagingDetailOpen} onOpenChange={setIsPackagingDetailOpen}>
         <DialogContent className="max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[92dvh] max-w-6xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              Detail Pembungkusan {selectedBatch ? `- ${selectedBatch.batch_code || `BATCH-${selectedBatch.batch_no}`}` : ""}
-            </DialogTitle>
+            <DialogTitle>Detail Pembungkusan {selectedBatch ? `- ${selectedBatch.batch_code || `BATCH-${selectedBatch.batch_no}`}` : ""}</DialogTitle>
           </DialogHeader>
 
-          {selectedBatch && packagingSummary.recipients.length > 0 ? (
+          {packagingSummary.recipients.length > 0 ? (
             <div className="space-y-4">
               <div className="grid gap-2 md:grid-cols-6">
                 <div className="rounded-md border bg-muted/20 p-2">

@@ -5,6 +5,8 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { DataTable, Column } from "@/components/shared/DataTable";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
 import { AsnafEligibilityBadges } from "@/components/shared/AsnafEligibilityBadges";
+import { TagMultiSelect } from "@/components/shared/TagMultiSelect";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { useAsnafSettings } from "@/hooks/useAsnafSettings";
 import { Button } from "@/components/ui/button";
@@ -36,7 +38,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Edit, Eye, Trash2 } from "lucide-react";
+import {
+  AlertCircle,
+  Edit,
+  Eye,
+  MapPin,
+  Phone,
+  Search,
+  StickyNote,
+  Trash2,
+  Users,
+  Users2,
+  Wallet,
+} from "lucide-react";
+import { dedupeTags, isMissingColumnError, matchesAllTags } from "@/lib/tagUtils";
 
 interface Mustahik {
   id: string;
@@ -50,6 +65,7 @@ interface Mustahik {
   monthly_income: number | null;
   monthly_expense: number | null;
   notes: string | null;
+  tags: string[];
   is_active: boolean;
 }
 
@@ -69,9 +85,13 @@ const PRIORITY_COLORS: Record<string, "default" | "secondary" | "destructive" | 
 
 export default function MustahikPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [detailMustahik, setDetailMustahik] = useState<Mustahik | null>(null);
   const [editingMustahik, setEditingMustahik] = useState<Mustahik | null>(null);
   const [deletingMustahik, setDeletingMustahik] = useState<Mustahik | null>(null);
   const [asnafFilter, setAsnafFilter] = useState<"all" | "amil" | "non_amil">("all");
+  const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isTagsColumnAvailable, setIsTagsColumnAvailable] = useState(true);
   const [formData, setFormData] = useState({
     name: "",
     address: "",
@@ -82,6 +102,7 @@ export default function MustahikPage() {
     monthly_income: "",
     monthly_expense: "",
     notes: "",
+    tags: [] as string[],
   });
 
   const { toast } = useToast();
@@ -89,18 +110,38 @@ export default function MustahikPage() {
   const { getAsnafOptions, getLabel } = useAsnafSettings();
   const queryClient = useQueryClient();
   const asnafOptions = getAsnafOptions();
+  const mustahikSelectBase = "id, name, address, phone, asnaf_id, priority, family_members, monthly_income, monthly_expense, notes, is_active, asnaf_settings(asnaf_code, asnaf_name)";
 
   const { data: mustahikList = [], isLoading } = useQuery({
     queryKey: ["mustahik"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("mustahik")
-        .select("*, asnaf_settings(asnaf_code, asnaf_name)")
+        .select(`${mustahikSelectBase}, tags`)
         .is("deleted_at", null) // Filter out soft-deleted records
         .order("priority", { ascending: false })
         .order("name");
 
+      if (error && isMissingColumnError(error, "mustahik", "tags")) {
+        setIsTagsColumnAvailable(false);
+
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from("mustahik")
+          .select(mustahikSelectBase)
+          .is("deleted_at", null)
+          .order("priority", { ascending: false })
+          .order("name");
+
+        if (fallbackError) throw fallbackError;
+
+        return (fallbackData || []).map((item) => ({
+          ...item,
+          tags: [],
+        })) as Mustahik[];
+      }
+
       if (error) throw error;
+      setIsTagsColumnAvailable(true);
       return data as Mustahik[];
     },
   });
@@ -144,7 +185,7 @@ export default function MustahikPage() {
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      const { error } = await supabase.from("mustahik").insert({
+      const payload = {
         name: data.name,
         address: data.address || null,
         phone: data.phone || null,
@@ -155,14 +196,36 @@ export default function MustahikPage() {
         monthly_income: data.monthly_income ? parseFloat(data.monthly_income) : null,
         monthly_expense: data.monthly_expense ? parseFloat(data.monthly_expense) : null,
         notes: data.notes || null,
+      };
+
+      const { error } = await supabase.from("mustahik").insert({
+        ...payload,
+        tags: dedupeTags(data.tags),
       });
+
+      if (error && isMissingColumnError(error, "mustahik", "tags")) {
+        setIsTagsColumnAvailable(false);
+
+        const { error: fallbackError } = await supabase.from("mustahik").insert(payload);
+        if (fallbackError) throw fallbackError;
+
+        return { tagsSkipped: true };
+      }
+
       if (error) throw error;
+      setIsTagsColumnAvailable(true);
+      return { tagsSkipped: false };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["mustahik"] });
       setIsDialogOpen(false);
       resetForm();
-      toast({ title: "Mustahik berhasil ditambahkan" });
+      toast({
+        title: "Mustahik berhasil ditambahkan",
+        description: result?.tagsSkipped
+          ? "Data utama tersimpan, tetapi tags belum aktif di database. Jalankan migration Supabase agar tags ikut tersimpan."
+          : undefined,
+      });
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Gagal", description: error.message });
@@ -171,29 +234,54 @@ export default function MustahikPage() {
 
   const updateMutation = useMutation({
     mutationFn: async (data: { id: string } & typeof formData) => {
+      const payload = {
+        name: data.name,
+        address: data.address || null,
+        phone: data.phone || null,
+        asnaf_id: data.asnaf_id,
+        asnaf: getAsnafCodeById(data.asnaf_id), // Legacy enum column
+        priority: data.priority as PriorityType,
+        family_members: data.family_members,
+        monthly_income: data.monthly_income ? parseFloat(data.monthly_income) : null,
+        monthly_expense: data.monthly_expense ? parseFloat(data.monthly_expense) : null,
+        notes: data.notes || null,
+      };
+
       const { error } = await supabase
         .from("mustahik")
         .update({
-          name: data.name,
-          address: data.address || null,
-          phone: data.phone || null,
-          asnaf_id: data.asnaf_id,
-          asnaf: getAsnafCodeById(data.asnaf_id), // Legacy enum column
-          priority: data.priority as PriorityType,
-          family_members: data.family_members,
-          monthly_income: data.monthly_income ? parseFloat(data.monthly_income) : null,
-          monthly_expense: data.monthly_expense ? parseFloat(data.monthly_expense) : null,
-          notes: data.notes || null,
+          ...payload,
+          tags: dedupeTags(data.tags),
         })
         .eq("id", data.id);
+
+      if (error && isMissingColumnError(error, "mustahik", "tags")) {
+        setIsTagsColumnAvailable(false);
+
+        const { error: fallbackError } = await supabase
+          .from("mustahik")
+          .update(payload)
+          .eq("id", data.id);
+
+        if (fallbackError) throw fallbackError;
+        return { tagsSkipped: true };
+      }
+
       if (error) throw error;
+      setIsTagsColumnAvailable(true);
+      return { tagsSkipped: false };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["mustahik"] });
       setIsDialogOpen(false);
       setEditingMustahik(null);
       resetForm();
-      toast({ title: "Mustahik berhasil diperbarui" });
+      toast({
+        title: "Mustahik berhasil diperbarui",
+        description: result?.tagsSkipped
+          ? "Perubahan tersimpan, tetapi kolom tags belum tersedia di database."
+          : undefined,
+      });
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Gagal", description: error.message });
@@ -239,6 +327,7 @@ export default function MustahikPage() {
       monthly_income: "",
       monthly_expense: "",
       notes: "",
+      tags: [],
     });
   };
 
@@ -254,6 +343,7 @@ export default function MustahikPage() {
       monthly_income: mustahik.monthly_income?.toString() || "",
       monthly_expense: mustahik.monthly_expense?.toString() || "",
       notes: mustahik.notes || "",
+      tags: mustahik.tags || [],
     });
     setIsDialogOpen(true);
   };
@@ -267,6 +357,15 @@ export default function MustahikPage() {
     }
   };
 
+  const formatCurrency = (value: number | null) =>
+    typeof value === "number"
+      ? new Intl.NumberFormat("id-ID", {
+          style: "currency",
+          currency: "IDR",
+          maximumFractionDigits: 0,
+        }).format(value)
+      : "-";
+
   const columns: Column<Mustahik>[] = [
     { key: "name", header: "Nama" },
     {
@@ -275,9 +374,16 @@ export default function MustahikPage() {
       render: (m) => {
         const asnafCode = m.asnaf_settings?.asnaf_code || "";
         return (
-          <div className="flex flex-col gap-1">
-            <Badge variant="outline">{m.asnaf_settings?.asnaf_name || "-"}</Badge>
-            <AsnafEligibilityBadges asnafCode={asnafCode} size="sm" />
+          <div className="flex max-w-[220px] flex-col gap-1.5">
+            <Badge
+              variant="outline"
+              className="w-fit rounded-full border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
+            >
+              {m.asnaf_settings?.asnaf_name || "-"}
+            </Badge>
+            <div className="w-fit">
+              <AsnafEligibilityBadges asnafCode={asnafCode} size="sm" />
+            </div>
           </div>
         );
       },
@@ -292,6 +398,27 @@ export default function MustahikPage() {
       ),
     },
     { key: "family_members", header: "Jml Anggota" },
+    {
+      key: "tags",
+      header: "Tags",
+      render: (m) =>
+        m.tags?.length ? (
+          <div className="flex max-w-[260px] flex-wrap gap-1.5">
+            {m.tags.slice(0, 3).map((tag) => (
+              <Badge key={tag} variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
+                {tag}
+              </Badge>
+            ))}
+            {m.tags.length > 3 && (
+              <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-[11px]">
+                +{m.tags.length - 3}
+              </Badge>
+            )}
+          </div>
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        ),
+    },
     { key: "phone", header: "Telepon" },
   ];
 
@@ -303,19 +430,54 @@ export default function MustahikPage() {
     () => mustahikList.filter((item) => item.asnaf_settings?.asnaf_code !== "amil").length,
     [mustahikList],
   );
+  const availableTags = useMemo(
+    () => dedupeTags(mustahikList.flatMap((item) => item.tags || [])),
+    [mustahikList],
+  );
   const filteredMustahikList = useMemo(() => {
-    if (asnafFilter === "amil") {
-      return mustahikList.filter((item) => item.asnaf_settings?.asnaf_code === "amil");
-    }
-    if (asnafFilter === "non_amil") {
-      return mustahikList.filter((item) => item.asnaf_settings?.asnaf_code !== "amil");
-    }
-    return mustahikList;
-  }, [mustahikList, asnafFilter]);
+    return mustahikList.filter((item) => {
+      const passesAsnaf =
+        asnafFilter === "amil"
+          ? item.asnaf_settings?.asnaf_code === "amil"
+          : asnafFilter === "non_amil"
+            ? item.asnaf_settings?.asnaf_code !== "amil"
+            : true;
+
+      const searchValue = searchQuery.trim().toLowerCase();
+      const haystack = [
+        item.name,
+        item.phone || "",
+        item.address || "",
+        item.asnaf_settings?.asnaf_name || "",
+        ...(item.tags || []),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      const passesSearch = !searchValue || haystack.includes(searchValue);
+
+      return passesAsnaf && matchesAllTags(item.tags, selectedTagFilters) && passesSearch;
+    });
+  }, [mustahikList, asnafFilter, selectedTagFilters, searchQuery]);
 
   return (
     <AppLayout title="Data Mustahik">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
+      {!isTagsColumnAvailable && (
+        <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-950 [&>svg]:text-amber-700">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Kolom tags belum aktif di database</AlertTitle>
+          <AlertDescription>
+            Fitur tags di UI sudah siap, tetapi Supabase kamu belum memuat migration terbaru. Jalankan
+            {" "}
+            <code>supabase db push</code>
+            {" "}
+            atau eksekusi SQL di
+            {" "}
+            <code>supabase/migrations/20260316093000_add_mustahik_tags.sql</code>.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <DataTable
         title="Daftar Mustahik"
@@ -323,51 +485,242 @@ export default function MustahikPage() {
         columns={columns}
         isLoading={isLoading}
         isReadOnly={isReadOnly}
-        onAdd={() => { resetForm(); setEditingMustahik(null); setIsDialogOpen(true); }}
-        addLabel="Tambah Mustahik"
-        searchKey="name"
-        searchPlaceholder="Cari mustahik..."
         emptyMessage="Belum ada data mustahik"
-        toolbarExtra={
-          <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-background/80 px-2 py-1">
-            <Badge variant="outline" className="hidden sm:inline-flex">
-              Amil: {amilCount}
-            </Badge>
-            <Badge variant="outline" className="hidden sm:inline-flex">
-              Non-Amil: {nonAmilCount}
-            </Badge>
-            <Select
-              value={asnafFilter}
-              onValueChange={(value) => setAsnafFilter(value as "all" | "amil" | "non_amil")}
-            >
-              <SelectTrigger className="h-8 min-w-[170px] border-0 bg-transparent px-2 text-xs focus:ring-0">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Asnaf</SelectItem>
-                <SelectItem value="amil">Amil Saja</SelectItem>
-                <SelectItem value="non_amil">Selain Amil</SelectItem>
-              </SelectContent>
-            </Select>
+        headerActions={
+          <div className="flex w-full flex-col gap-3 lg:min-w-[700px]">
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.9fr)_auto]">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2 shadow-sm">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Total</p>
+                  <p className="mt-1 text-base font-semibold">{mustahikList.length}</p>
+                </div>
+                <div className="rounded-2xl border border-emerald-200/70 bg-emerald-50/70 px-3 py-2 shadow-sm">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-700">Amil</p>
+                  <p className="mt-1 text-base font-semibold text-emerald-900">{amilCount}</p>
+                </div>
+                <div className="rounded-2xl border border-sky-200/70 bg-sky-50/70 px-3 py-2 shadow-sm">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-sky-700">Non-Amil</p>
+                  <p className="mt-1 text-base font-semibold text-sky-900">{nonAmilCount}</p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2 shadow-sm">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Tag Aktif</p>
+                  <p className="mt-1 flex items-center gap-1 text-base font-semibold">
+                    <Users2 className="h-4 w-4 text-primary" />
+                    {selectedTagFilters.length || 0}
+                  </p>
+                </div>
+              </div>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Cari nama, alamat, telepon, asnaf, atau tags..."
+                  className="h-11 rounded-2xl border-border/70 bg-background/85 pl-10 pr-4 text-sm shadow-sm"
+                />
+              </div>
+              {!isReadOnly && (
+                <Button
+                  className="h-11 rounded-2xl px-5 text-sm"
+                  onClick={() => {
+                    resetForm();
+                    setEditingMustahik(null);
+                    setIsDialogOpen(true);
+                  }}
+                >
+                  Tambah Mustahik
+                </Button>
+              )}
+            </div>
+            <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_auto]">
+              <div className="rounded-2xl border border-border/70 bg-background/85 p-2 shadow-sm">
+                <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                  Kategori
+                </p>
+                <Select
+                  value={asnafFilter}
+                  onValueChange={(value) => setAsnafFilter(value as "all" | "amil" | "non_amil")}
+                >
+                  <SelectTrigger className="h-10 rounded-xl border-0 bg-transparent text-sm shadow-none focus:ring-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua Asnaf</SelectItem>
+                    <SelectItem value="amil">Amil Saja</SelectItem>
+                    <SelectItem value="non_amil">Selain Amil</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                    Filter Tags
+                  </p>
+                  {selectedTagFilters.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 rounded-full px-2 text-[11px]"
+                      onClick={() => setSelectedTagFilters([])}
+                    >
+                      Reset
+                    </Button>
+                  )}
+                </div>
+                <TagMultiSelect
+                  value={selectedTagFilters}
+                  onChange={setSelectedTagFilters}
+                  options={availableTags}
+                  placeholder="Cari lalu pilih tags untuk filter"
+                  searchPlaceholder="Cari tags mustahik..."
+                  emptyLabel="Belum ada tag yang cocok"
+                  helperText="Menampilkan mustahik yang memiliki semua tags terpilih."
+                  allowCreate={false}
+                />
+              </div>
+              <div className="flex items-end">
+                {(searchQuery || selectedTagFilters.length > 0 || asnafFilter !== "all") && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full rounded-2xl text-sm lg:w-auto"
+                    onClick={() => {
+                      setSearchQuery("");
+                      setSelectedTagFilters([]);
+                      setAsnafFilter("all");
+                    }}
+                  >
+                    Reset Semua Filter
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         }
         actions={(mustahik) => (
-          !isReadOnly ? (
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" onClick={() => handleEdit(mustahik)}>
-                <Edit className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" onClick={() => setDeletingMustahik(mustahik)}>
-                <Trash2 className="h-4 w-4 text-destructive" />
-              </Button>
-            </div>
-          ) : (
-            <Button variant="ghost" size="icon">
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" onClick={() => setDetailMustahik(mustahik)}>
               <Eye className="h-4 w-4" />
             </Button>
-          )
+            {!isReadOnly ? (
+              <>
+                <Button variant="ghost" size="icon" onClick={() => handleEdit(mustahik)}>
+                  <Edit className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" onClick={() => setDeletingMustahik(mustahik)}>
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              </>
+            ) : null}
+          </div>
         )}
       />
+
+      <Dialog open={!!detailMustahik} onOpenChange={(open) => !open && setDetailMustahik(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Detail Mustahik</DialogTitle>
+          </DialogHeader>
+          {detailMustahik && (
+            <div className="space-y-5">
+              <div className="rounded-3xl border border-border/70 bg-gradient-to-br from-background to-muted/30 p-5 shadow-sm">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-[0.22em] text-muted-foreground">
+                      Profil Penerima
+                    </p>
+                    <h3 className="text-2xl font-semibold text-foreground">{detailMustahik.name}</h3>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
+                      >
+                        {detailMustahik.asnaf_settings?.asnaf_name || "-"}
+                      </Badge>
+                      <Badge variant={PRIORITY_COLORS[detailMustahik.priority]}>
+                        {PRIORITY_LABELS[detailMustahik.priority] || detailMustahik.priority}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-border/70 bg-background/85 p-3 shadow-sm">
+                    <AsnafEligibilityBadges
+                      asnafCode={detailMustahik.asnaf_settings?.asnaf_code || ""}
+                      showLabels
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-border/70 bg-background/85 p-4 shadow-sm">
+                  <div className="mb-2 flex items-center gap-2 text-muted-foreground">
+                    <Users className="h-4 w-4" />
+                    <span className="text-xs uppercase tracking-[0.18em]">Anggota</span>
+                  </div>
+                  <p className="text-lg font-semibold">{detailMustahik.family_members || 1} jiwa</p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-background/85 p-4 shadow-sm">
+                  <div className="mb-2 flex items-center gap-2 text-muted-foreground">
+                    <Wallet className="h-4 w-4" />
+                    <span className="text-xs uppercase tracking-[0.18em]">Penghasilan</span>
+                  </div>
+                  <p className="text-lg font-semibold">{formatCurrency(detailMustahik.monthly_income)}</p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-background/85 p-4 shadow-sm">
+                  <div className="mb-2 flex items-center gap-2 text-muted-foreground">
+                    <Wallet className="h-4 w-4" />
+                    <span className="text-xs uppercase tracking-[0.18em]">Pengeluaran</span>
+                  </div>
+                  <p className="text-lg font-semibold">{formatCurrency(detailMustahik.monthly_expense)}</p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-background/85 p-4 shadow-sm">
+                  <div className="mb-2 flex items-center gap-2 text-muted-foreground">
+                    <Phone className="h-4 w-4" />
+                    <span className="text-xs uppercase tracking-[0.18em]">Telepon</span>
+                  </div>
+                  <p className="text-sm font-medium">{detailMustahik.phone || "-"}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-[1.3fr_0.9fr]">
+                <div className="rounded-2xl border border-border/70 bg-background/85 p-4 shadow-sm">
+                  <div className="mb-2 flex items-center gap-2 text-muted-foreground">
+                    <MapPin className="h-4 w-4" />
+                    <span className="text-xs uppercase tracking-[0.18em]">Alamat</span>
+                  </div>
+                  <p className="text-sm leading-6 text-foreground">{detailMustahik.address || "-"}</p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-background/85 p-4 shadow-sm">
+                  <div className="mb-3 flex items-center gap-2 text-muted-foreground">
+                    <Users2 className="h-4 w-4" />
+                    <span className="text-xs uppercase tracking-[0.18em]">Tags</span>
+                  </div>
+                  {detailMustahik.tags?.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {detailMustahik.tags.map((tag) => (
+                        <Badge key={tag} variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Belum ada tags</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border/70 bg-background/85 p-4 shadow-sm">
+                <div className="mb-2 flex items-center gap-2 text-muted-foreground">
+                  <StickyNote className="h-4 w-4" />
+                  <span className="text-xs uppercase tracking-[0.18em]">Catatan</span>
+                </div>
+                <p className="text-sm leading-6 text-foreground">{detailMustahik.notes || "-"}</p>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-lg">
@@ -470,6 +823,20 @@ export default function MustahikPage() {
                 id="notes"
                 value={formData.notes}
                 onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Tags</Label>
+              <TagMultiSelect
+                value={formData.tags}
+                onChange={(tags) => setFormData({ ...formData, tags })}
+                options={availableTags}
+                placeholder="Pilih atau buat tags"
+                searchPlaceholder="Cari tags atau buat baru..."
+                emptyLabel="Tag belum ada"
+                helperText="Tags bisa lebih dari satu untuk memudahkan pencarian dan penugasan."
+                allowCreate
+                portalled={false}
               />
             </div>
             <div className="flex justify-end gap-2">

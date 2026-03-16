@@ -697,7 +697,7 @@ export default function ZakatFitrah() {
                         {tx.transaction_no ? `ZF-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
-                        {format(new Date(tx.transaction_date), "dd MMM yyyy", { locale: idLocale })}
+                        {format(new Date(tx.transaction_date), "dd MMM yyyy, HH.mm", { locale: idLocale })}
                       </TableCell>
                       <TableCell className="font-medium whitespace-nowrap">{tx.muzakki?.name}</TableCell>
                       <TableCell className="whitespace-nowrap">

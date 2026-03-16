@@ -549,7 +549,7 @@ export default function ZakatMal() {
                         {tx.transaction_no ? `ZM-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
-                        {format(new Date(tx.transaction_date), "dd MMM yyyy", { locale: idLocale })}
+                        {format(new Date(tx.transaction_date), "dd MMM yyyy, HH.mm", { locale: idLocale })}
                       </TableCell>
                       <TableCell>
                         <p className="font-medium">{tx.muzakki_member?.name || tx.muzakki?.name || "-"}</p>
