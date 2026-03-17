@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useAsnafSettings, AsnafSetting } from "./useAsnafSettings";
+import { sortMustahikByRoute } from "@/lib/mustahikRoute";
 
 interface Mustahik {
   id: string;
@@ -8,6 +9,9 @@ interface Mustahik {
   asnaf_settings?: { asnaf_code: string } | null;
   priority: string;
   family_members?: number | null;
+  distribution_rt?: string | null;
+  distribution_lane?: string | null;
+  delivery_order?: number | null;
 }
 
 interface FundBalance {
@@ -80,8 +84,8 @@ export function useDistributionCalculation(
     const excludeExistingDistributed = options?.excludeExistingDistributed ?? true;
 
     // Separate Amil from other mustahik
-    const amilList = mustahikList.filter(m => getAsnafCode(m) === "amil");
-    const beneficiaryList = mustahikList.filter(m => getAsnafCode(m) !== "amil");
+    const amilList = sortMustahikByRoute(mustahikList.filter(m => getAsnafCode(m) === "amil"));
+    const beneficiaryList = sortMustahikByRoute(mustahikList.filter(m => getAsnafCode(m) !== "amil"));
 
     // Filter mustahik based on eligibility for each fund type
     const getEligibleForZakatFitrah = (list: Mustahik[]) => {

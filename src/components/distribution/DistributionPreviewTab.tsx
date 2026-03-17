@@ -22,6 +22,7 @@ import { Eye, FileText, AlertCircle } from "lucide-react";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useDistributionCalculation, type AmilDistributionMode } from "@/hooks/useDistributionCalculation";
 import { useAsnafSettings } from "@/hooks/useAsnafSettings";
+import { compareMustahikRoute, formatMustahikRoute } from "@/lib/mustahikRoute";
 
 interface DistributionPreviewTabProps {
   periodId: string;
@@ -34,6 +35,9 @@ interface RecipientPreview {
   name: string;
   asnaf: string;
   isAmil: boolean;
+  distribution_rt: string | null;
+  distribution_lane: string | null;
+  delivery_order: number | null;
   totalRice: number;
   totalCash: number;
   totalFood: number;
@@ -73,13 +77,22 @@ export function DistributionPreviewTab({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("mustahik")
-        .select("id, name, asnaf_id, priority, family_members, asnaf_settings(asnaf_code)")
+        .select("id, name, asnaf_id, priority, family_members, distribution_rt, distribution_lane, delivery_order, asnaf_settings(asnaf_code)")
         .eq("is_active", true)
         .is("deleted_at", null)
-        .order("priority", { ascending: false })
         .order("name");
       if (error) throw error;
-      return data as { id: string; name: string; asnaf_id: string; priority: string; family_members: number; asnaf_settings: { asnaf_code: string } | null }[];
+      return data as {
+        id: string;
+        name: string;
+        asnaf_id: string;
+        priority: string;
+        family_members: number;
+        distribution_rt: string | null;
+        distribution_lane: string | null;
+        delivery_order: number | null;
+        asnaf_settings: { asnaf_code: string } | null;
+      }[];
     },
   });
 
@@ -142,6 +155,9 @@ export function DistributionPreviewTab({
         name: m.name,
         asnaf: asnafCode,
         isAmil: asnafCode === "amil",
+        distribution_rt: m.distribution_rt || null,
+        distribution_lane: m.distribution_lane || null,
+        delivery_order: m.delivery_order ?? null,
         totalRice: 0,
         totalCash: 0,
         totalFood: 0,
@@ -204,10 +220,9 @@ export function DistributionPreviewTab({
     return Array.from(recipientMap.values())
       .filter(r => r.totalCash > 0 || r.totalRice > 0 || r.totalFood > 0)
       .sort((a, b) => {
-        // Sort: Amil first, then by total value
-        if (a.isAmil && !b.isAmil) return -1;
-        if (!a.isAmil && b.isAmil) return 1;
-        return (b.totalCash + b.totalRice * 15000) - (a.totalCash + a.totalRice * 15000);
+        const routeCompare = compareMustahikRoute(a, b);
+        if (routeCompare !== 0) return routeCompare;
+        return a.asnaf.localeCompare(b.asnaf);
       });
   }, [mustahikList, calculations]);
 
@@ -345,6 +360,7 @@ export function DistributionPreviewTab({
               <TableHeader>
                 <TableRow>
                   <TableHead>Nama</TableHead>
+                  <TableHead>Rute</TableHead>
                   <TableHead>Asnaf</TableHead>
                   <TableHead className="text-right">Beras (kg)</TableHead>
                   <TableHead className="text-right">Uang</TableHead>
@@ -356,6 +372,9 @@ export function DistributionPreviewTab({
                 {previewData.map(r => (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{r.name}</TableCell>
+                    <TableCell>
+                      <span className="text-sm text-muted-foreground">{formatMustahikRoute(r) || "-"}</span>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={r.isAmil ? "default" : "outline"}>
                         {getLabel(r.asnaf)}
@@ -399,6 +418,7 @@ export function DistributionPreviewTab({
                 <Badge variant={selectedRecipient.isAmil ? "default" : "outline"}>
                   {getLabel(selectedRecipient.asnaf)}
                 </Badge>
+                <span className="text-xs text-muted-foreground">{formatMustahikRoute(selectedRecipient) || "Rute belum diatur"}</span>
                 {selectedRecipient.isAmil && (
                   <span className="text-xs text-muted-foreground">
                     (Porsi amil mengikuti mode simulasi alokasi aktif)

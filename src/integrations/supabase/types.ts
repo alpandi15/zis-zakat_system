@@ -555,6 +555,9 @@ export type Database = {
           created_at: string
           created_by: string | null
           deleted_at: string | null
+          delivery_order: number | null
+          distribution_lane: string | null
+          distribution_rt: string | null
           email: string | null
           family_members: number | null
           id: string
@@ -575,6 +578,9 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           deleted_at?: string | null
+          delivery_order?: number | null
+          distribution_lane?: string | null
+          distribution_rt?: string | null
           email?: string | null
           family_members?: number | null
           id?: string
@@ -595,6 +601,9 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           deleted_at?: string | null
+          delivery_order?: number | null
+          distribution_lane?: string | null
+          distribution_rt?: string | null
           email?: string | null
           family_members?: number | null
           id?: string

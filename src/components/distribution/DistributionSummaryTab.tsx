@@ -23,6 +23,7 @@ import { formatCurrency } from "@/lib/formatCurrency";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { useAsnafSettings } from "@/hooks/useAsnafSettings";
+import { compareMustahikRoute, formatMustahikRoute } from "@/lib/mustahikRoute";
 
 interface DistributionSummaryTabProps {
   periodId: string;
@@ -32,6 +33,9 @@ interface MustahikSummary {
   id: string;
   name: string;
   asnaf: string;
+  distribution_rt: string | null;
+  distribution_lane: string | null;
+  delivery_order: number | null;
   totalRice: number;
   totalCash: number;
   fidyahFood: number;
@@ -121,7 +125,7 @@ export function DistributionSummaryTab({ periodId }: DistributionSummaryTabProps
     queryFn: async () => {
       const { data, error } = await supabase
         .from("mustahik")
-        .select("id, name, asnaf")
+        .select("id, name, asnaf, distribution_rt, distribution_lane, delivery_order")
         .order("name");
       if (error) throw error;
       return data;
@@ -146,6 +150,9 @@ export function DistributionSummaryTab({ periodId }: DistributionSummaryTabProps
         id: m.id,
         name: m.name,
         asnaf: m.asnaf,
+        distribution_rt: m.distribution_rt || null,
+        distribution_lane: m.distribution_lane || null,
+        delivery_order: m.delivery_order ?? null,
         totalRice: 0,
         totalCash: 0,
         fidyahFood: 0,
@@ -212,12 +219,11 @@ export function DistributionSummaryTab({ periodId }: DistributionSummaryTabProps
     return Array.from(summaryMap.values())
       .filter(s => s.totalCash > 0 || s.totalRice > 0 || s.fidyahFood > 0)
       .sort((a, b) => {
-        // Sort by delivery status: pending first, then delivered, then not_delivered
         const statusOrder: Record<string, number> = { pending: 0, delivered: 1, not_delivered: 2 };
         const aOrder = a.deliveryStatus ? statusOrder[a.deliveryStatus] ?? 3 : 3;
         const bOrder = b.deliveryStatus ? statusOrder[b.deliveryStatus] ?? 3 : 3;
         if (aOrder !== bOrder) return aOrder - bOrder;
-        return (b.totalCash + b.totalRice * 15000) - (a.totalCash + a.totalRice * 15000);
+        return compareMustahikRoute(a, b);
       });
   }, [mustahikList, zakatDist, fidyahDist, assignmentMap]);
 
@@ -362,6 +368,7 @@ export function DistributionSummaryTab({ periodId }: DistributionSummaryTabProps
               <TableHeader>
                 <TableRow>
                   <TableHead>Nama</TableHead>
+                  <TableHead>Rute</TableHead>
                   <TableHead>Asnaf</TableHead>
                   <TableHead className="text-right">Total Beras</TableHead>
                   <TableHead className="text-right">Total Uang</TableHead>
@@ -375,6 +382,9 @@ export function DistributionSummaryTab({ periodId }: DistributionSummaryTabProps
                 {summaryData.map(s => (
                   <TableRow key={s.id}>
                     <TableCell className="font-medium">{s.name}</TableCell>
+                    <TableCell>
+                      <span className="text-sm text-muted-foreground">{formatMustahikRoute(s) || "-"}</span>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={s.asnaf === "amil" ? "default" : "outline"}>
                         {getLabel(s.asnaf)}
@@ -441,6 +451,7 @@ export function DistributionSummaryTab({ periodId }: DistributionSummaryTabProps
                 <Badge variant={selectedMustahik.asnaf === "amil" ? "default" : "outline"}>
                   {getLabel(selectedMustahik.asnaf)}
                 </Badge>
+                <span className="text-xs text-muted-foreground">{formatMustahikRoute(selectedMustahik) || "Rute belum diatur"}</span>
                 {selectedMustahik.deliveryStatus && (
                   <Badge 
                     variant={DELIVERY_STATUS_CONFIG[selectedMustahik.deliveryStatus]?.variant || "secondary"}

@@ -30,6 +30,7 @@ import {
 import { Calculator, Coins, Wheat, Utensils, Scale, ArrowRight, Sparkles, Lock, Info } from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
+import { compareMustahikRoute } from "@/lib/mustahikRoute";
 
 interface FundBalance {
   category: FundCategory;
@@ -71,6 +72,9 @@ interface PackagingRecipientSummary {
   name: string;
   asnafCode: string;
   priority: string;
+  distribution_rt?: string | null;
+  distribution_lane?: string | null;
+  delivery_order?: number | null;
   isAmil: boolean;
   totalCash: number;
   totalRiceKg: number;
@@ -211,7 +215,17 @@ const createEmptyPackagingSummary = (): PackagingSummary => ({
 
 const buildPackagingSummary = (
   items: PackagingSourceItem[],
-  mustahikMetaMap: Map<string, { name: string; asnafCode: string; priority: string }>,
+  mustahikMetaMap: Map<
+    string,
+    {
+      name: string;
+      asnafCode: string;
+      priority: string;
+      distribution_rt?: string | null;
+      distribution_lane?: string | null;
+      delivery_order?: number | null;
+    }
+  >,
 ): PackagingSummary => {
   if (items.length === 0) return createEmptyPackagingSummary();
 
@@ -226,6 +240,9 @@ const buildPackagingSummary = (
         name: item.name || meta?.name || "Mustahik",
         asnafCode: item.asnafCode || meta?.asnafCode || "",
         priority: String(item.priority || meta?.priority || "medium"),
+        distribution_rt: meta?.distribution_rt || null,
+        distribution_lane: meta?.distribution_lane || null,
+        delivery_order: meta?.delivery_order ?? null,
         isAmil: Boolean(item.isAmil || (item.asnafCode || meta?.asnafCode || "") === "amil"),
         totalCash: 0,
         totalRiceKg: 0,
@@ -247,9 +264,7 @@ const buildPackagingSummary = (
     recipientMap.set(item.mustahikId, current);
   });
 
-  const recipients = Array.from(recipientMap.values()).sort(
-    (a, b) => a.asnafCode.localeCompare(b.asnafCode) || a.name.localeCompare(b.name),
-  );
+  const recipients = Array.from(recipientMap.values()).sort(compareMustahikRoute);
 
   const asnafMap = new Map<string, PackagingAsnafSummary>();
   recipients.forEach((recipient) => {
@@ -379,10 +394,9 @@ export default function Calculations() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("mustahik")
-        .select("id, name, asnaf_id, priority, family_members, asnaf_settings(asnaf_code)")
+        .select("id, name, asnaf_id, priority, family_members, distribution_rt, distribution_lane, delivery_order, asnaf_settings(asnaf_code)")
         .eq("is_active", true)
         .is("deleted_at", null)
-        .order("priority", { ascending: false })
         .order("name");
       if (error) throw error;
       return data as {
@@ -391,6 +405,9 @@ export default function Calculations() {
         asnaf_id: string;
         priority: string;
         family_members: number;
+        distribution_rt: string | null;
+        distribution_lane: string | null;
+        delivery_order: number | null;
         asnaf_settings: { asnaf_code: string } | null;
       }[];
     },
@@ -605,7 +622,20 @@ export default function Calculations() {
   const demoProportionalRice = Number((sampleRiceKg * demoProportionalShare).toFixed(2));
 
   const mustahikMetaMap = useMemo(
-    () => new Map(mustahikList.map((m) => [m.id, { name: m.name, asnafCode: m.asnaf_settings?.asnaf_code || "", priority: m.priority }])),
+    () =>
+      new Map(
+        mustahikList.map((m) => [
+          m.id,
+          {
+            name: m.name,
+            asnafCode: m.asnaf_settings?.asnaf_code || "",
+            priority: m.priority,
+            distribution_rt: m.distribution_rt,
+            distribution_lane: m.distribution_lane,
+            delivery_order: m.delivery_order,
+          },
+        ]),
+      ),
     [mustahikList],
   );
 

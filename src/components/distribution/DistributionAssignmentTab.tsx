@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { CreatableSingleSelect } from "@/components/shared/CreatableSingleSelect";
 import {
   Table,
   TableBody,
@@ -30,15 +31,40 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { TagMultiSelect } from "@/components/shared/TagMultiSelect";
+import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { exportToPDF } from "@/lib/exportUtils";
-import { dedupeTags, isMissingColumnError, matchesAllTags } from "@/lib/tagUtils";
-import { UserPlus, CheckCircle2, XCircle, Edit, Trash2, Users, Download, FileText } from "lucide-react";
+import { isMissingColumnError } from "@/lib/tagUtils";
+import { compareMustahikRoute, formatMustahikRoute, sortMustahikByRoute } from "@/lib/mustahikRoute";
+import {
+  AlertCircle,
+  UserPlus,
+  CheckCircle2,
+  XCircle,
+  Edit,
+  Trash2,
+  Users,
+  Download,
+  FileText,
+  MapPinned,
+  Route,
+  Search,
+} from "lucide-react";
 
 interface DistributionAssignmentTabProps {
   periodId: string;
   isReadOnly: boolean;
+}
+
+interface AssignmentMustahik {
+  id?: string;
+  name: string;
+  asnaf: string;
+  address: string | null;
+  distribution_rt: string | null;
+  distribution_lane: string | null;
+  delivery_order: number | null;
 }
 
 interface Assignment {
@@ -49,8 +75,12 @@ interface Assignment {
   delivery_notes: string | null;
   assigned_at: string;
   delivered_at: string | null;
-  mustahik?: { name: string; asnaf: string; address: string | null; tags: string[] };
+  mustahik?: AssignmentMustahik;
   assignee?: { full_name: string | null; email: string | null };
+}
+
+interface MustahikOption extends AssignmentMustahik {
+  id: string;
 }
 
 const ASNAF_LABELS: Record<string, string> = {
@@ -74,105 +104,123 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
   const { user, isAdmin } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  
+
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [isDeliveryDialogOpen, setIsDeliveryDialogOpen] = useState(false);
   const [selectedMustahik, setSelectedMustahik] = useState<string[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<string>("");
-  const [selectedAssignmentTags, setSelectedAssignmentTags] = useState<string[]>([]);
-  const [selectedDialogTags, setSelectedDialogTags] = useState<string[]>([]);
-  const [isTagsColumnAvailable, setIsTagsColumnAvailable] = useState(true);
+  const [assignmentRtFilter, setAssignmentRtFilter] = useState("all");
+  const [assignmentLaneFilter, setAssignmentLaneFilter] = useState("all");
+  const [assignmentSearch, setAssignmentSearch] = useState("");
+  const [dialogRtFilter, setDialogRtFilter] = useState("all");
+  const [dialogLaneFilter, setDialogLaneFilter] = useState("all");
+  const [dialogSearch, setDialogSearch] = useState("");
+  const [isRouteFieldsAvailable, setIsRouteFieldsAvailable] = useState(true);
   const [editingAssignment, setEditingAssignment] = useState<Assignment | null>(null);
   const [deliveryStatus, setDeliveryStatus] = useState<string>("delivered");
   const [deliveryNotes, setDeliveryNotes] = useState("");
 
   const isAdminUser = isAdmin();
 
-  // Fetch assignments
+  const mapAssigneeProfiles = async (rows: { assigned_to: string }[]) => {
+    const userIds = [...new Set(rows.map((row) => row.assigned_to))];
+    if (userIds.length === 0) return new Map<string, { full_name: string | null; email: string | null }>();
+
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", userIds);
+
+    return new Map(profiles?.map((profile) => [profile.id, profile]) || []);
+  };
+
   const { data: assignments = [], isLoading } = useQuery({
     queryKey: ["distribution-assignments", periodId],
     queryFn: async () => {
+      const assignmentSelectWithRoute =
+        "*, mustahik:mustahik_id(id, name, asnaf, address, distribution_rt, distribution_lane, delivery_order)";
+      const assignmentSelectFallback = "*, mustahik:mustahik_id(id, name, asnaf, address)";
+
       const { data, error } = await supabase
         .from("distribution_assignments")
-        .select("*, mustahik:mustahik_id(name, asnaf, address, tags)")
+        .select(assignmentSelectWithRoute)
         .eq("period_id", periodId)
         .order("assigned_at", { ascending: false });
-      if (error && isMissingColumnError(error, "mustahik", "tags")) {
-        setIsTagsColumnAvailable(false);
 
+      if (error && isMissingColumnError(error, "mustahik", "distribution_rt")) {
+        setIsRouteFieldsAvailable(false);
         const { data: fallbackData, error: fallbackError } = await supabase
           .from("distribution_assignments")
-          .select("*, mustahik:mustahik_id(name, asnaf, address)")
+          .select(assignmentSelectFallback)
           .eq("period_id", periodId)
           .order("assigned_at", { ascending: false });
 
         if (fallbackError) throw fallbackError;
 
-        const userIds = [...new Set(fallbackData.map((a) => a.assigned_to))];
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("id, full_name, email")
-          .in("id", userIds);
-
-        const profileMap = new Map(profiles?.map((p) => [p.id, p]) || []);
-
-        return fallbackData.map((a) => ({
-          ...a,
-          mustahik: a.mustahik ? { ...a.mustahik, tags: [] } : undefined,
-          assignee: profileMap.get(a.assigned_to) || { full_name: null, email: null },
+        const profileMap = await mapAssigneeProfiles(fallbackData || []);
+        return (fallbackData || []).map((assignment) => ({
+          ...assignment,
+          mustahik: assignment.mustahik
+            ? {
+                ...assignment.mustahik,
+                distribution_rt: null,
+                distribution_lane: null,
+                delivery_order: null,
+              }
+            : undefined,
+          assignee: profileMap.get(assignment.assigned_to) || { full_name: null, email: null },
         })) as Assignment[];
       }
 
       if (error) throw error;
-      setIsTagsColumnAvailable(true);
-      
-      // Fetch assignee profiles separately
-      const userIds = [...new Set(data.map(a => a.assigned_to))];
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, full_name, email")
-        .in("id", userIds);
-      
-      const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
-      
-      return data.map(a => ({
-        ...a,
-        assignee: profileMap.get(a.assigned_to) || { full_name: null, email: null }
+      setIsRouteFieldsAvailable(true);
+
+      const profileMap = await mapAssigneeProfiles(data || []);
+      return (data || []).map((assignment) => ({
+        ...assignment,
+        assignee: profileMap.get(assignment.assigned_to) || { full_name: null, email: null },
       })) as Assignment[];
     },
     enabled: !!periodId,
   });
 
-  // Fetch active mustahik for assignment
   const { data: mustahikList = [] } = useQuery({
     queryKey: ["mustahik-active"],
     queryFn: async () => {
+      const selectWithRoute = "id, name, asnaf, address, distribution_rt, distribution_lane, delivery_order";
+      const selectFallback = "id, name, asnaf, address";
+
       const { data, error } = await supabase
         .from("mustahik")
-        .select("id, name, asnaf, address, tags")
+        .select(selectWithRoute)
         .eq("is_active", true)
+        .is("deleted_at", null)
         .order("name");
 
-      if (error && isMissingColumnError(error, "mustahik", "tags")) {
-        setIsTagsColumnAvailable(false);
-
+      if (error && isMissingColumnError(error, "mustahik", "distribution_rt")) {
+        setIsRouteFieldsAvailable(false);
         const { data: fallbackData, error: fallbackError } = await supabase
           .from("mustahik")
-          .select("id, name, asnaf, address")
+          .select(selectFallback)
           .eq("is_active", true)
+          .is("deleted_at", null)
           .order("name");
 
         if (fallbackError) throw fallbackError;
-        return (fallbackData || []).map((item) => ({ ...item, tags: [] }));
+        return (fallbackData || []).map((item) => ({
+          ...item,
+          distribution_rt: null,
+          distribution_lane: null,
+          delivery_order: null,
+        })) as MustahikOption[];
       }
 
       if (error) throw error;
-      setIsTagsColumnAvailable(true);
-      return data;
+      setIsRouteFieldsAvailable(true);
+      return (data || []) as MustahikOption[];
     },
   });
 
-  // Fetch staff (non-admin users)
   const { data: staffList = [] } = useQuery({
     queryKey: ["staff-users"],
     queryFn: async () => {
@@ -186,54 +234,91 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
     enabled: isAdminUser,
   });
 
-  // Filter my assignments if not admin
   const baseDisplayedAssignments = useMemo(() => {
-    if (isAdminUser) return assignments;
-    return assignments.filter(a => a.assigned_to === user?.id);
+    const scoped = isAdminUser ? assignments : assignments.filter((assignment) => assignment.assigned_to === user?.id);
+    return [...scoped].sort((left, right) => {
+      const routeCompare = compareMustahikRoute(left.mustahik || {}, right.mustahik || {});
+      if (routeCompare !== 0) return routeCompare;
+      return new Date(left.assigned_at).getTime() - new Date(right.assigned_at).getTime();
+    });
   }, [assignments, isAdminUser, user?.id]);
 
-  const availableTags = useMemo(
-    () =>
-      dedupeTags([
-        ...mustahikList.flatMap((item) => item.tags || []),
-        ...assignments.flatMap((item) => item.mustahik?.tags || []),
-      ]),
-    [assignments, mustahikList],
+  const rtOptions = useMemo(
+    () => Array.from(new Set(mustahikList.map((item) => item.distribution_rt?.trim()).filter(Boolean) as string[])).sort(),
+    [mustahikList],
   );
 
-  const displayedAssignments = useMemo(
-    () => baseDisplayedAssignments.filter((assignment) => matchesAllTags(assignment.mustahik?.tags, selectedAssignmentTags)),
-    [baseDisplayedAssignments, selectedAssignmentTags],
-  );
+  const assignmentLaneOptions = useMemo(() => {
+    const baseItems = assignmentRtFilter === "all"
+      ? baseDisplayedAssignments
+      : baseDisplayedAssignments.filter((item) => (item.mustahik?.distribution_rt?.trim() || "") === assignmentRtFilter);
 
-  // Get already assigned mustahik IDs
-  const assignedMustahikIds = useMemo(() => {
-    return new Set(assignments.map(a => a.mustahik_id));
-  }, [assignments]);
+    return Array.from(
+      new Set(baseItems.map((item) => item.mustahik?.distribution_lane?.trim()).filter(Boolean) as string[]),
+    ).sort();
+  }, [assignmentRtFilter, baseDisplayedAssignments]);
 
-  const filteredMustahikForDialog = useMemo(
-    () => mustahikList.filter((item) => matchesAllTags(item.tags, selectedDialogTags)),
-    [mustahikList, selectedDialogTags],
-  );
+  const dialogLaneOptions = useMemo(() => {
+    const baseItems = dialogRtFilter === "all"
+      ? mustahikList
+      : mustahikList.filter((item) => (item.distribution_rt?.trim() || "") === dialogRtFilter);
 
-  // Create assignment mutation
+    return Array.from(
+      new Set(baseItems.map((item) => item.distribution_lane?.trim()).filter(Boolean) as string[]),
+    ).sort();
+  }, [dialogRtFilter, mustahikList]);
+
+  const displayedAssignments = useMemo(() => {
+    const searchValue = assignmentSearch.trim().toLowerCase();
+    return baseDisplayedAssignments.filter((assignment) => {
+      const passesRt = assignmentRtFilter === "all" || (assignment.mustahik?.distribution_rt?.trim() || "") === assignmentRtFilter;
+      const passesLane = assignmentLaneFilter === "all" || (assignment.mustahik?.distribution_lane?.trim() || "") === assignmentLaneFilter;
+      const haystack = [
+        assignment.mustahik?.name || "",
+        assignment.mustahik?.address || "",
+        assignment.mustahik?.distribution_rt || "",
+        assignment.mustahik?.distribution_lane || "",
+        assignment.assignee?.full_name || "",
+        assignment.assignee?.email || "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      const passesSearch = !searchValue || haystack.includes(searchValue);
+      return passesRt && passesLane && passesSearch;
+    });
+  }, [assignmentLaneFilter, assignmentRtFilter, assignmentSearch, baseDisplayedAssignments]);
+
+  const assignedMustahikIds = useMemo(() => new Set(assignments.map((assignment) => assignment.mustahik_id)), [assignments]);
+
+  const filteredMustahikForDialog = useMemo(() => {
+    const searchValue = dialogSearch.trim().toLowerCase();
+    const filtered = mustahikList.filter((item) => {
+      const passesRt = dialogRtFilter === "all" || (item.distribution_rt?.trim() || "") === dialogRtFilter;
+      const passesLane = dialogLaneFilter === "all" || (item.distribution_lane?.trim() || "") === dialogLaneFilter;
+      const haystack = [item.name, item.address || "", item.distribution_rt || "", item.distribution_lane || "", item.asnaf]
+        .join(" ")
+        .toLowerCase();
+      const passesSearch = !searchValue || haystack.includes(searchValue);
+      return passesRt && passesLane && passesSearch;
+    });
+
+    return sortMustahikByRoute(filtered);
+  }, [dialogLaneFilter, dialogRtFilter, dialogSearch, mustahikList]);
+
   const createAssignmentMutation = useMutation({
     mutationFn: async () => {
       if (!selectedStaff || selectedMustahik.length === 0) {
         throw new Error("Pilih petugas dan minimal satu mustahik");
       }
 
-      const insertData = selectedMustahik.map(mustahikId => ({
+      const insertData = selectedMustahik.map((mustahikId) => ({
         period_id: periodId,
         mustahik_id: mustahikId,
         assigned_to: selectedStaff,
         created_by: user?.id,
       }));
 
-      const { error } = await supabase
-        .from("distribution_assignments")
-        .insert(insertData);
-      
+      const { error } = await supabase.from("distribution_assignments").insert(insertData);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -248,7 +333,6 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
     },
   });
 
-  // Update delivery status mutation
   const updateDeliveryMutation = useMutation({
     mutationFn: async () => {
       if (!editingAssignment) throw new Error("No assignment selected");
@@ -262,11 +346,7 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
         updateData.delivered_at = new Date().toISOString();
       }
 
-      const { error } = await supabase
-        .from("distribution_assignments")
-        .update(updateData)
-        .eq("id", editingAssignment.id);
-      
+      const { error } = await supabase.from("distribution_assignments").update(updateData).eq("id", editingAssignment.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -281,13 +361,9 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
     },
   });
 
-  // Delete assignment mutation
   const deleteAssignmentMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("distribution_assignments")
-        .delete()
-        .eq("id", id);
+      const { error } = await supabase.from("distribution_assignments").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -307,27 +383,23 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
   };
 
   const toggleMustahik = (id: string) => {
-    setSelectedMustahik(prev => 
-      prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]
-    );
+    setSelectedMustahik((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
   };
 
   const selectAllUnassigned = () => {
-    const unassigned = filteredMustahikForDialog
-      .filter(m => !assignedMustahikIds.has(m.id))
-      .map(m => m.id);
+    const unassigned = filteredMustahikForDialog.filter((item) => !assignedMustahikIds.has(item.id)).map((item) => item.id);
     setSelectedMustahik(unassigned);
   };
 
-  // Stats
-  const stats = useMemo(() => {
-    return {
+  const stats = useMemo(
+    () => ({
       total: displayedAssignments.length,
-      pending: displayedAssignments.filter(a => a.status === "pending").length,
-      delivered: displayedAssignments.filter(a => a.status === "delivered").length,
-      notDelivered: displayedAssignments.filter(a => a.status === "not_delivered").length,
-    };
-  }, [displayedAssignments]);
+      pending: displayedAssignments.filter((item) => item.status === "pending").length,
+      delivered: displayedAssignments.filter((item) => item.status === "delivered").length,
+      notDelivered: displayedAssignments.filter((item) => item.status === "not_delivered").length,
+    }),
+    [displayedAssignments],
+  );
 
   const handleExportAssignmentsPdf = () => {
     if (displayedAssignments.length === 0) {
@@ -340,22 +412,27 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
         title: "Daftar Mustahik Tertugaskan",
         subtitle: `${isAdminUser ? "Semua petugas" : "Penugasan saya"} • ${displayedAssignments.length} mustahik`,
         columns: [
-          { header: "Nama", key: "name", width: 24 },
-          { header: "Asnaf", key: "asnaf", width: 16 },
-          { header: "Tags", key: "tags", width: 28 },
-          { header: "Alamat", key: "address", width: 38 },
+          { header: "Nama", key: "name", width: 22 },
+          { header: "Asnaf", key: "asnaf", width: 14 },
+          { header: "RT", key: "distribution_rt", width: 10 },
+          { header: "Gang/Jalur", key: "distribution_lane", width: 16 },
+          { header: "Urut", key: "delivery_order", width: 9 },
+          { header: "Alamat", key: "address", width: 34 },
           { header: "Petugas", key: "staff", width: 22 },
         ],
         rows: displayedAssignments.map((assignment) => ({
           name: assignment.mustahik?.name || "-",
           asnaf: ASNAF_LABELS[assignment.mustahik?.asnaf || ""] || assignment.mustahik?.asnaf || "-",
-          tags: assignment.mustahik?.tags?.length ? assignment.mustahik.tags.join(", ") : "-",
+          distribution_rt: assignment.mustahik?.distribution_rt || "-",
+          distribution_lane: assignment.mustahik?.distribution_lane || "-",
+          delivery_order: assignment.mustahik?.delivery_order ?? "-",
           address: assignment.mustahik?.address || "-",
           staff: assignment.assignee?.full_name || assignment.assignee?.email || "-",
         })),
         summary: {
           "Total Mustahik": displayedAssignments.length,
-          "Filter Tags": selectedAssignmentTags.length ? selectedAssignmentTags.join(", ") : "Semua",
+          "Filter RT": assignmentRtFilter === "all" ? "Semua" : assignmentRtFilter,
+          "Filter Gang/Jalur": assignmentLaneFilter === "all" ? "Semua" : assignmentLaneFilter,
         },
       },
       "daftar-penugasan-mustahik",
@@ -364,7 +441,16 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
 
   return (
     <div className="space-y-4">
-      {/* Stats Cards */}
+      {!isRouteFieldsAvailable && (
+        <Alert className="border-amber-200 bg-amber-50 text-amber-950 [&>svg]:text-amber-700">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Field rute mustahik belum aktif di database</AlertTitle>
+          <AlertDescription>
+            Jalankan <code>supabase db push</code> agar filter RT, gang, dan urutan distribusi aktif di penugasan petugas.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
@@ -400,70 +486,84 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
         </Card>
       </div>
 
-      {/* Assignments Table */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              {isAdminUser ? "Semua Penugasan" : "Penugasan Saya"}
-            </CardTitle>
-            <CardDescription>
-              {isAdminUser 
-                ? "Kelola penugasan distribusi ke petugas" 
-                : "Daftar mustahik yang ditugaskan kepada Anda"}
-            </CardDescription>
+        <CardHeader className="space-y-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Users className="h-4 w-4" />
+                {isAdminUser ? "Semua Penugasan" : "Penugasan Saya"}
+              </CardTitle>
+              <CardDescription>
+                {isAdminUser ? "Kelola penugasan distribusi ke petugas" : "Daftar mustahik yang ditugaskan kepada Anda"}
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" onClick={handleExportAssignmentsPdf} className="gap-2">
+                <Download className="h-4 w-4" />
+                Download PDF
+              </Button>
+              {isAdminUser && !isReadOnly && (
+                <Button onClick={() => setIsAssignDialogOpen(true)}>
+                  <UserPlus className="mr-2 h-4 w-4" />
+                  Tugaskan
+                </Button>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={handleExportAssignmentsPdf} className="gap-2">
-              <Download className="h-4 w-4" />
-              Download PDF
-            </Button>
-            {isAdminUser && !isReadOnly && (
-              <Button onClick={() => setIsAssignDialogOpen(true)}>
-                <UserPlus className="h-4 w-4 mr-2" />
-                Tugaskan
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_220px_220px_auto]">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={assignmentSearch}
+                onChange={(event) => setAssignmentSearch(event.target.value)}
+                placeholder="Cari mustahik, alamat, RT, gang, atau petugas..."
+                className="h-10 rounded-xl pl-10"
+              />
+            </div>
+            <CreatableSingleSelect
+              value={assignmentRtFilter === "all" ? "" : assignmentRtFilter}
+              onChange={(value) => {
+                setAssignmentRtFilter(value.trim() ? value : "all");
+                setAssignmentLaneFilter("all");
+              }}
+              options={rtOptions}
+              placeholder="Semua RT"
+              searchPlaceholder="Cari RT..."
+              emptyLabel="RT tidak ditemukan"
+              allowCreate={false}
+            />
+            <CreatableSingleSelect
+              value={assignmentLaneFilter === "all" ? "" : assignmentLaneFilter}
+              onChange={(value) => setAssignmentLaneFilter(value.trim() ? value : "all")}
+              options={assignmentLaneOptions}
+              placeholder="Semua Gang"
+              searchPlaceholder="Cari gang / jalur..."
+              emptyLabel="Gang tidak ditemukan"
+              allowCreate={false}
+            />
+            {(assignmentSearch || assignmentRtFilter !== "all" || assignmentLaneFilter !== "all") && (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-xl"
+                onClick={() => {
+                  setAssignmentSearch("");
+                  setAssignmentRtFilter("all");
+                  setAssignmentLaneFilter("all");
+                }}
+              >
+                Reset Filter
               </Button>
             )}
           </div>
         </CardHeader>
         <CardContent>
-          <div className="mb-4 rounded-2xl border border-border/70 bg-background/80 p-3 shadow-sm">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-primary" />
-                <p className="text-sm font-medium">Filter Tags Penugasan</p>
-              </div>
-              {selectedAssignmentTags.length > 0 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 rounded-full px-2 text-[11px]"
-                  onClick={() => setSelectedAssignmentTags([])}
-                >
-                  Reset
-                </Button>
-              )}
-            </div>
-            <TagMultiSelect
-              value={selectedAssignmentTags}
-              onChange={setSelectedAssignmentTags}
-              options={availableTags}
-              placeholder="Cari lalu pilih tags mustahik"
-              searchPlaceholder="Cari tags..."
-              emptyLabel="Tag tidak ditemukan"
-              helperText={
-                isTagsColumnAvailable
-                  ? "PDF dan tabel hanya menampilkan mustahik yang sesuai dengan semua tags terpilih."
-                  : "Kolom tags belum aktif di database. Jalankan migration Supabase agar filter tags berfungsi."
-              }
-            />
-          </div>
           {isLoading ? (
-            <p className="text-muted-foreground text-center py-8">Memuat...</p>
+            <p className="py-8 text-center text-muted-foreground">Memuat...</p>
           ) : displayedAssignments.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">
+            <p className="py-8 text-center text-muted-foreground">
               {isAdminUser ? "Belum ada penugasan" : "Tidak ada penugasan untuk Anda"}
             </p>
           ) : (
@@ -471,6 +571,7 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
               <TableHeader>
                 <TableRow>
                   <TableHead>Mustahik</TableHead>
+                  <TableHead>Rute</TableHead>
                   <TableHead>Asnaf</TableHead>
                   {isAdminUser && <TableHead>Petugas</TableHead>}
                   <TableHead>Status</TableHead>
@@ -479,42 +580,50 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {displayedAssignments.map(a => (
-                  <TableRow key={a.id}>
-                    <TableCell className="font-medium">{a.mustahik?.name}</TableCell>
+                {displayedAssignments.map((assignment) => (
+                  <TableRow key={assignment.id}>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <p className="font-medium">{assignment.mustahik?.name || "-"}</p>
+                        <p className="max-w-[240px] truncate text-xs text-muted-foreground">
+                          {assignment.mustahik?.address || "-"}
+                        </p>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1.5">
+                        <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
+                          {assignment.mustahik?.distribution_rt || "RT belum diisi"}
+                        </Badge>
+                        <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-[11px]">
+                          {assignment.mustahik?.distribution_lane || "Gang belum diisi"}
+                        </Badge>
+                        <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-[11px]">
+                          {typeof assignment.mustahik?.delivery_order === "number" ? `Urut ${assignment.mustahik.delivery_order}` : "Urut -"}
+                        </Badge>
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline">
-                        {ASNAF_LABELS[a.mustahik?.asnaf || ""] || "-"}
+                        {ASNAF_LABELS[assignment.mustahik?.asnaf || ""] || "-"}
                       </Badge>
                     </TableCell>
-                    {isAdminUser && (
-                      <TableCell>{a.assignee?.full_name || a.assignee?.email || "-"}</TableCell>
-                    )}
+                    {isAdminUser && <TableCell>{assignment.assignee?.full_name || assignment.assignee?.email || "-"}</TableCell>}
                     <TableCell>
-                      <Badge variant={STATUS_CONFIG[a.status]?.variant || "secondary"}>
-                        {STATUS_CONFIG[a.status]?.label || a.status}
+                      <Badge variant={STATUS_CONFIG[assignment.status]?.variant || "secondary"}>
+                        {STATUS_CONFIG[assignment.status]?.label || assignment.status}
                       </Badge>
                     </TableCell>
-                    <TableCell className="max-w-[200px] truncate">
-                      {a.delivery_notes || "-"}
-                    </TableCell>
+                    <TableCell className="max-w-[220px] truncate">{assignment.delivery_notes || "-"}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
                         {!isReadOnly && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openDeliveryDialog(a)}
-                          >
+                          <Button variant="ghost" size="icon" onClick={() => openDeliveryDialog(assignment)}>
                             <Edit className="h-4 w-4" />
                           </Button>
                         )}
                         {isAdminUser && !isReadOnly && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => deleteAssignmentMutation.mutate(a.id)}
-                          >
+                          <Button variant="ghost" size="icon" onClick={() => deleteAssignmentMutation.mutate(assignment.id)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         )}
@@ -528,9 +637,8 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
         </CardContent>
       </Card>
 
-      {/* Assign Dialog (Admin only) */}
       <Dialog open={isAssignDialogOpen} onOpenChange={setIsAssignDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] overflow-y-auto">
+        <DialogContent className="max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] max-w-3xl overflow-y-auto sm:max-h-[90dvh]">
           <DialogHeader>
             <DialogTitle>Tugaskan Mustahik ke Petugas</DialogTitle>
           </DialogHeader>
@@ -542,24 +650,28 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
                   <SelectValue placeholder="Pilih petugas..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {staffList.map(s => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.full_name || s.email}
+                  {staffList.map((staff) => (
+                    <SelectItem key={staff.id} value={staff.id}>
+                      {staff.full_name || staff.email}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
+            <div className="space-y-3 rounded-2xl border border-border/70 bg-background/80 p-3">
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <Label>Pilih Mustahik ({selectedMustahik.length} dipilih)</Label>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Button
                     variant="ghost"
                     size="sm"
                     className="h-7 rounded-full px-2 text-[11px]"
-                    onClick={() => setSelectedDialogTags([])}
+                    onClick={() => {
+                      setDialogSearch("");
+                      setDialogRtFilter("all");
+                      setDialogLaneFilter("all");
+                    }}
                   >
                     Reset Filter
                   </Button>
@@ -568,49 +680,78 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
                   </Button>
                 </div>
               </div>
-              <TagMultiSelect
-                value={selectedDialogTags}
-                onChange={setSelectedDialogTags}
-                options={availableTags}
-                placeholder="Cari mustahik berdasarkan tags"
-                searchPlaceholder="Cari tags mustahik..."
-                emptyLabel="Tag tidak ditemukan"
-                helperText="Daftar calon mustahik di bawah akan tersaring sesuai tags."
-                portalled={false}
-              />
-              <div className="border rounded-lg max-h-[300px] overflow-y-auto">
+
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_220px_220px]">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={dialogSearch}
+                    onChange={(event) => setDialogSearch(event.target.value)}
+                    placeholder="Cari nama, alamat, RT, atau gang..."
+                    className="h-10 rounded-xl pl-10"
+                  />
+                </div>
+                <CreatableSingleSelect
+                  value={dialogRtFilter === "all" ? "" : dialogRtFilter}
+                  onChange={(value) => {
+                    setDialogRtFilter(value.trim() ? value : "all");
+                    setDialogLaneFilter("all");
+                  }}
+                  options={rtOptions}
+                  placeholder="Semua RT"
+                  searchPlaceholder="Cari RT..."
+                  emptyLabel="RT tidak ditemukan"
+                  allowCreate={false}
+                  portalled={false}
+                />
+                <CreatableSingleSelect
+                  value={dialogLaneFilter === "all" ? "" : dialogLaneFilter}
+                  onChange={(value) => setDialogLaneFilter(value.trim() ? value : "all")}
+                  options={dialogLaneOptions}
+                  placeholder="Semua Gang"
+                  searchPlaceholder="Cari gang / jalur..."
+                  emptyLabel="Gang tidak ditemukan"
+                  allowCreate={false}
+                  portalled={false}
+                />
+              </div>
+
+              <div className="max-h-[380px] overflow-y-auto rounded-lg border">
                 {filteredMustahikForDialog.length === 0 && (
-                  <p className="p-4 text-sm text-muted-foreground">Tidak ada mustahik yang cocok dengan filter tags.</p>
+                  <p className="p-4 text-sm text-muted-foreground">Tidak ada mustahik yang cocok dengan filter wilayah.</p>
                 )}
-                {filteredMustahikForDialog.map(m => {
-                  const isAssigned = assignedMustahikIds.has(m.id);
+                {filteredMustahikForDialog.map((mustahik) => {
+                  const isAssigned = assignedMustahikIds.has(mustahik.id);
                   return (
                     <div
-                      key={m.id}
-                      className={`flex items-center gap-3 p-3 border-b last:border-0 ${
-                        isAssigned ? "opacity-50 bg-muted/50" : ""
-                      }`}
+                      key={mustahik.id}
+                      className={`flex items-start gap-3 border-b p-3 last:border-0 ${isAssigned ? "bg-muted/50 opacity-50" : ""}`}
                     >
                       <Checkbox
-                        checked={selectedMustahik.includes(m.id)}
-                        onCheckedChange={() => toggleMustahik(m.id)}
+                        checked={selectedMustahik.includes(mustahik.id)}
+                        onCheckedChange={() => toggleMustahik(mustahik.id)}
                         disabled={isAssigned}
                       />
-                      <div className="flex-1">
-                        <p className="font-medium">{m.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {ASNAF_LABELS[m.asnaf] || m.asnaf}
-                          {isAssigned && " • Sudah ditugaskan"}
-                        </p>
-                        {!!m.tags?.length && (
-                          <div className="mt-1 flex flex-wrap gap-1.5">
-                            {m.tags.map((tag) => (
-                              <Badge key={tag} variant="secondary" className="rounded-full px-2 py-0.5 text-[10px]">
-                                {tag}
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium">{mustahik.name}</p>
+                          <Badge variant="outline" className="rounded-full px-2 py-0.5 text-[10px]">
+                            {ASNAF_LABELS[mustahik.asnaf] || mustahik.asnaf}
+                          </Badge>
+                          {isAssigned && <Badge variant="secondary">Sudah ditugaskan</Badge>}
+                        </div>
+                        <p className="text-xs text-muted-foreground">{mustahik.address || "-"}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[10px]">
+                            {mustahik.distribution_rt || "RT belum diisi"}
+                          </Badge>
+                          <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-[10px]">
+                            {mustahik.distribution_lane || "Gang belum diisi"}
+                          </Badge>
+                          <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-[10px]">
+                            {typeof mustahik.delivery_order === "number" ? `Urut ${mustahik.delivery_order}` : "Urut -"}
+                          </Badge>
+                        </div>
                       </div>
                     </div>
                   );
@@ -622,7 +763,7 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
             <Button variant="outline" onClick={() => setIsAssignDialogOpen(false)}>
               Batal
             </Button>
-            <Button 
+            <Button
               onClick={() => createAssignmentMutation.mutate()}
               disabled={createAssignmentMutation.isPending || !selectedStaff || selectedMustahik.length === 0}
             >
@@ -632,18 +773,18 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
         </DialogContent>
       </Dialog>
 
-      {/* Delivery Status Dialog */}
       <Dialog open={isDeliveryDialogOpen} onOpenChange={setIsDeliveryDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Update Status Pengiriman</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div>
+            <div className="space-y-1">
               <p className="text-sm text-muted-foreground">Mustahik</p>
               <p className="font-medium">{editingAssignment?.mustahik?.name}</p>
+              <p className="text-xs text-muted-foreground">{formatMustahikRoute(editingAssignment?.mustahik || {}) || "Rute belum diatur"}</p>
             </div>
-            
+
             <div className="space-y-2">
               <Label>Status Pengiriman</Label>
               <div className="flex gap-2">
@@ -652,7 +793,7 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
                   className="flex-1"
                   onClick={() => setDeliveryStatus("delivered")}
                 >
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
                   Terkirim
                 </Button>
                 <Button
@@ -660,7 +801,7 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
                   className="flex-1"
                   onClick={() => setDeliveryStatus("not_delivered")}
                 >
-                  <XCircle className="h-4 w-4 mr-2" />
+                  <XCircle className="mr-2 h-4 w-4" />
                   Tidak Terkirim
                 </Button>
               </div>
@@ -672,7 +813,7 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
                 id="notes"
                 placeholder="Tambahkan catatan (opsional)..."
                 value={deliveryNotes}
-                onChange={(e) => setDeliveryNotes(e.target.value)}
+                onChange={(event) => setDeliveryNotes(event.target.value)}
               />
             </div>
           </div>
@@ -680,10 +821,7 @@ export function DistributionAssignmentTab({ periodId, isReadOnly }: Distribution
             <Button variant="outline" onClick={() => setIsDeliveryDialogOpen(false)}>
               Batal
             </Button>
-            <Button 
-              onClick={() => updateDeliveryMutation.mutate()}
-              disabled={updateDeliveryMutation.isPending}
-            >
+            <Button onClick={() => updateDeliveryMutation.mutate()} disabled={updateDeliveryMutation.isPending}>
               Simpan
             </Button>
           </DialogFooter>
