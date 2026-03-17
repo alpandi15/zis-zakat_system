@@ -118,20 +118,46 @@ const compareNullableNumber = (a: number | null | undefined, b: number | null | 
   return (a || 0) - (b || 0);
 };
 
-const sortMustahikByRoute = (items: Mustahik[]): Mustahik[] => {
-  return [...items].sort((left, right) => {
-    const byRt = compareNullableText(left.distribution_rt, right.distribution_rt);
-    if (byRt !== 0) return byRt;
+// const sortMustahikByRoute = (items: Mustahik[]): Mustahik[] => {
+//   return [...items].sort((left, right) => {
+//     const byRt = compareNullableText(left.distribution_rt, right.distribution_rt);
+//     if (byRt !== 0) return byRt;
 
-    const byLane = compareNullableText(left.distribution_lane, right.distribution_lane);
-    if (byLane !== 0) return byLane;
+//     const byLane = compareNullableText(left.distribution_lane, right.distribution_lane);
+//     if (byLane !== 0) return byLane;
 
-    const byOrder = compareNullableNumber(left.delivery_order, right.delivery_order);
-    if (byOrder !== 0) return byOrder;
+//     const byOrder = compareNullableNumber(left.delivery_order, right.delivery_order);
+//     if (byOrder !== 0) return byOrder;
 
-    return routeCollator.compare(left.name, right.name);
-  });
-};
+//     return routeCollator.compare(left.name, right.name);
+//   });
+// };
+
+  const sortMustahikByRoute = (
+    items: Mustahik[],
+    orderSort: "asc" | "desc"
+  ): Mustahik[] => {
+    return [...items].sort((left, right) => {
+      // 🔥 kalau mau pure sort by order (override grouping)
+      const leftOrder = left.delivery_order ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = right.delivery_order ?? Number.MAX_SAFE_INTEGER;
+
+      if (leftOrder !== rightOrder) {
+        return orderSort === "asc"
+          ? leftOrder - rightOrder
+          : rightOrder - leftOrder;
+      }
+
+      // fallback baru pakai grouping
+      const byRt = compareNullableText(left.distribution_rt, right.distribution_rt);
+      if (byRt !== 0) return byRt;
+
+      const byLane = compareNullableText(left.distribution_lane, right.distribution_lane);
+      if (byLane !== 0) return byLane;
+
+      return routeCollator.compare(left.name, right.name);
+    });
+  };
 
 export default function MustahikPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -142,6 +168,7 @@ export default function MustahikPage() {
   const [rtFilter, setRtFilter] = useState("all");
   const [laneFilter, setLaneFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [orderSort, setOrderSort] = useState<"asc" | "desc">("asc");
   const [isRouteFieldsAvailable, setIsRouteFieldsAvailable] = useState(true);
   const [formData, setFormData] = useState<MustahikFormData>({
     name: "",
@@ -474,8 +501,8 @@ export default function MustahikPage() {
       return passesAsnaf && passesRt && passesLane && passesSearch;
     });
 
-    return sortMustahikByRoute(filtered);
-  }, [mustahikList, asnafFilter, rtFilter, laneFilter, searchQuery]);
+    return sortMustahikByRoute(filtered, orderSort);
+  }, [mustahikList, asnafFilter, rtFilter, laneFilter, searchQuery, orderSort]);
 
   const amilCount = useMemo(
     () => mustahikList.filter((item) => item.asnaf_settings?.asnaf_code === "amil").length,
@@ -538,7 +565,7 @@ export default function MustahikPage() {
   };
 
   const columns: Column<Mustahik>[] = [
-    { key: "name", header: "Nama" },
+    { key: "name", header: "Nama", className: 'whitespace-nowrap' },
     {
       key: "asnaf_id",
       header: "Asnaf",
@@ -548,7 +575,7 @@ export default function MustahikPage() {
           <div className="flex max-w-[220px] flex-col gap-1.5">
             <Badge
               variant="outline"
-              className="w-fit rounded-full border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
+              className="whitespace-nowrap w-fit rounded-full border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
             >
               {item.asnaf_settings?.asnaf_name || "-"}
             </Badge>
@@ -564,10 +591,10 @@ export default function MustahikPage() {
       header: "Wilayah Distribusi",
       render: (item) => (
         <div className="flex max-w-[250px] flex-wrap gap-1.5">
-          <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
+          <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px] whitespace-nowrap">
             {item.distribution_rt ? `RT ${item.distribution_rt}` : "RT belum diisi"}
           </Badge>
-          <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-[11px]">
+          <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-[11px] whitespace-nowrap">
             {item.distribution_lane ? item.distribution_lane : "Gang belum diisi"}
           </Badge>
         </div>
@@ -577,7 +604,7 @@ export default function MustahikPage() {
       key: "delivery_order",
       header: "Urutan",
       render: (item) => (
-        <Badge className="rounded-full bg-emerald-600 px-2.5 py-0.5 text-[11px]">
+        <Badge className="rounded-full bg-emerald-600 px-2.5 py-0.5 text-[11px] whitespace-nowrap">
           {typeof item.delivery_order === "number" ? `Urut ${item.delivery_order}` : "Belum diatur"}
         </Badge>
       ),
@@ -586,7 +613,7 @@ export default function MustahikPage() {
       key: "priority",
       header: "Prioritas",
       render: (item) => (
-        <Badge variant={PRIORITY_COLORS[item.priority]}>
+        <Badge variant={PRIORITY_COLORS[item.priority]} className="whitespace-nowrap">
           {PRIORITY_LABELS[item.priority] || item.priority}
         </Badge>
       ),
@@ -595,7 +622,7 @@ export default function MustahikPage() {
       key: "address",
       header: "Alamat",
       render: (item) => (
-        <p className="max-w-[320px] text-sm leading-5 text-foreground/90">{item.address || "-"}</p>
+        <p className="w-[320px] text-sm leading-5 text-foreground/90">{item.address || "-"}</p>
       ),
     },
   ];
@@ -647,7 +674,7 @@ export default function MustahikPage() {
               </div>
 
               <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Search className="pointer-events-none absolute left-3 md:top-1/3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
@@ -730,6 +757,21 @@ export default function MustahikPage() {
                 />
               </div>
 
+              <div className="rounded-2xl border border-border/70 bg-background/85 p-2 shadow-sm">
+                <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                  Urutan Distribusi
+                </p>
+                <Select value={orderSort} onValueChange={(value) => setOrderSort(value as "asc" | "desc")}>
+                  <SelectTrigger className="h-10 rounded-xl border-0 bg-transparent text-sm shadow-none">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="asc">Urutan Kecil → Besar</SelectItem>
+                    <SelectItem value="desc">Urutan Besar → Kecil</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               <div className="flex items-end">
                 {(searchQuery || asnafFilter !== "all" || rtFilter !== "all" || laneFilter !== "all") && (
                   <Button
@@ -741,6 +783,7 @@ export default function MustahikPage() {
                       setAsnafFilter("all");
                       setRtFilter("all");
                       setLaneFilter("all");
+                      setOrderSort("asc");
                     }}
                   >
                     Reset Semua Filter
