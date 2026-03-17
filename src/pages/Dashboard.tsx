@@ -93,12 +93,20 @@ export default function Dashboard() {
       helper: "Akumulasi zakat fitrah beras",
     },
     {
-      title: "Muzakki Bertransaksi",
-      value: `${summary?.total_muzakki || 0} orang`,
+      title: "Muzakki Kepala Keluarga",
+      value: `${summary?.total_muzakki_households || 0} orang`,
       icon: Users,
       tone: "text-sky-700",
       bg: "from-sky-50 to-sky-100/80 border-sky-200/80",
-      helper: "Jumlah muzakki pada periode terpilih",
+      helper: "Jumlah kepala keluarga yang bertransaksi pada periode ini",
+    },
+    {
+      title: "Muzakki Jiwa/Fitrah",
+      value: `${summary?.total_jiwa_fitrah || 0} jiwa`,
+      icon: Activity,
+      tone: "text-cyan-700",
+      bg: "from-cyan-50 to-cyan-100/80 border-cyan-200/80",
+      helper: "Akumulasi total jiwa/fitrah dari transaksi zakat fitrah",
     },
     {
       title: "Distribusi Tersalurkan",
@@ -180,7 +188,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {summaryCards.map((item) => (
             <Card key={item.title} className={`border bg-gradient-to-br ${item.bg}`}>
               <CardContent className="p-3.5 sm:p-4">

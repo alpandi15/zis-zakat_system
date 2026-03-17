@@ -95,12 +95,8 @@ export default function MustahikPage() {
   const [formData, setFormData] = useState({
     name: "",
     address: "",
-    phone: "",
     asnaf_id: "",
     priority: "medium",
-    family_members: 1,
-    monthly_income: "",
-    monthly_expense: "",
     notes: "",
     tags: [] as string[],
   });
@@ -188,13 +184,13 @@ export default function MustahikPage() {
       const payload = {
         name: data.name,
         address: data.address || null,
-        phone: data.phone || null,
+        phone: null,
         asnaf_id: data.asnaf_id,
         asnaf: getAsnafCodeById(data.asnaf_id), // Legacy enum column
         priority: data.priority as PriorityType,
-        family_members: data.family_members,
-        monthly_income: data.monthly_income ? parseFloat(data.monthly_income) : null,
-        monthly_expense: data.monthly_expense ? parseFloat(data.monthly_expense) : null,
+        family_members: null,
+        monthly_income: null,
+        monthly_expense: null,
         notes: data.notes || null,
       };
 
@@ -237,13 +233,13 @@ export default function MustahikPage() {
       const payload = {
         name: data.name,
         address: data.address || null,
-        phone: data.phone || null,
+        phone: null,
         asnaf_id: data.asnaf_id,
         asnaf: getAsnafCodeById(data.asnaf_id), // Legacy enum column
         priority: data.priority as PriorityType,
-        family_members: data.family_members,
-        monthly_income: data.monthly_income ? parseFloat(data.monthly_income) : null,
-        monthly_expense: data.monthly_expense ? parseFloat(data.monthly_expense) : null,
+        family_members: null,
+        monthly_income: null,
+        monthly_expense: null,
         notes: data.notes || null,
       };
 
@@ -320,12 +316,8 @@ export default function MustahikPage() {
     setFormData({
       name: "",
       address: "",
-      phone: "",
       asnaf_id: defaultAsnaf?.id || "",
       priority: "medium",
-      family_members: 1,
-      monthly_income: "",
-      monthly_expense: "",
       notes: "",
       tags: [],
     });
@@ -336,12 +328,8 @@ export default function MustahikPage() {
     setFormData({
       name: mustahik.name,
       address: mustahik.address || "",
-      phone: mustahik.phone || "",
       asnaf_id: mustahik.asnaf_id,
       priority: mustahik.priority,
-      family_members: mustahik.family_members || 1,
-      monthly_income: mustahik.monthly_income?.toString() || "",
-      monthly_expense: mustahik.monthly_expense?.toString() || "",
       notes: mustahik.notes || "",
       tags: mustahik.tags || [],
     });
@@ -515,7 +503,7 @@ export default function MustahikPage() {
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Cari nama, alamat, telepon, asnaf, atau tags..."
+                  placeholder="Cari nama, alamat, asnaf, atau tags..."
                   className="h-11 rounded-2xl border-border/70 bg-background/85 pl-10 pr-4 text-sm shadow-sm"
                 />
               </div>
@@ -771,42 +759,6 @@ export default function MustahikPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">Telepon</Label>
-                <Input
-                  id="phone"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="family_members">Jumlah Anggota</Label>
-                <Input
-                  id="family_members"
-                  type="number"
-                  min={1}
-                  value={formData.family_members}
-                  onChange={(e) => setFormData({ ...formData, family_members: parseInt(e.target.value) })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="monthly_income">Penghasilan/Bulan</Label>
-                <Input
-                  id="monthly_income"
-                  type="number"
-                  value={formData.monthly_income}
-                  onChange={(e) => setFormData({ ...formData, monthly_income: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="monthly_expense">Pengeluaran/Bulan</Label>
-                <Input
-                  id="monthly_expense"
-                  type="number"
-                  value={formData.monthly_expense}
-                  onChange={(e) => setFormData({ ...formData, monthly_expense: e.target.value })}
-                />
               </div>
             </div>
             <div className="space-y-2">
