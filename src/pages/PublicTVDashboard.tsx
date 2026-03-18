@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MASJID_ADDRESS, MASJID_NAME } from "@/lib/masjidProfile";
@@ -14,7 +12,6 @@ import {
   RefreshCw,
   Scale,
   Sparkles,
-  TrendingUp,
   Users,
   Wheat,
 } from "lucide-react";
@@ -31,33 +28,9 @@ import {
   CartesianGrid,
 } from "recharts";
 
-interface FundBalance {
-  category: string;
-  total_cash: number;
-  total_rice_kg: number;
-  total_food_kg: number;
-}
-
-interface ZakatFitrahTx {
-  muzakki_id: string | null;
-  money_amount: number | null;
-  rice_amount_kg: number | null;
-  total_members: number | null;
-  transaction_date: string;
-}
-
-interface ZakatMalTx {
-  muzakki_id: string | null;
-  final_zakat_amount: number | null;
-  transaction_date: string;
-}
-
-interface FidyahTx {
-  payer_muzakki_id: string | null;
-  cash_amount: number | null;
-  food_amount_kg: number | null;
-  transaction_date: string;
-}
+import { supabase } from "@/integrations/supabase/client";
+import { useDashboardSummary } from "@/hooks/useDashboardSummary";
+import { useDashboardRealtime } from "@/hooks/useDashboardRealtime";
 
 const CASH_COLORS = ["#16a34a", "#0ea5e9", "#f59e0b"];
 
@@ -75,7 +48,10 @@ const formatCurrency = (value: number): string =>
   }).format(Math.round(value));
 
 const formatWeight = (value: number): string =>
-  `${new Intl.NumberFormat("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value)} kg`;
+  `${new Intl.NumberFormat("id-ID", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(value)} kg`;
 
 const formatDateTime = (value: string | null): string => {
   if (!value) return "-";
@@ -87,166 +63,26 @@ const formatDateTime = (value: string | null): string => {
   }).format(date);
 };
 
-const getLatestDate = (rows: { transaction_date: string }[]): string | null => {
-  if (rows.length === 0) return null;
-  return rows.reduce((latest, current) =>
-    new Date(current.transaction_date).getTime() > new Date(latest).getTime()
-      ? current.transaction_date
-      : latest,
-  rows[0].transaction_date);
-};
-
-const getEarliestDate = (rows: { transaction_date: string }[]): string | null => {
-  if (rows.length === 0) return null;
-  return rows.reduce((earliest, current) =>
-    new Date(current.transaction_date).getTime() < new Date(earliest).getTime()
-      ? current.transaction_date
-      : earliest,
-  rows[0].transaction_date);
-};
-
-function usePublicDashboardData() {
-  return useQuery({
-    queryKey: ["public-tv-dashboard"],
-    queryFn: async () => {
-      const { data: period, error: periodError } = await supabase
-        .from("periods")
-        .select("*")
-        .eq("status", "active")
-        .order("hijri_year", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (periodError) throw periodError;
-      if (!period) return null;
-
-      const [balancesRes, fitrahRes, malRes, fidyahRes, zakatDistRes, fidyahDistRes] = await Promise.all([
-        supabase.rpc("get_all_fund_balances", { _period_id: period.id }),
-        supabase
-          .from("zakat_fitrah_transactions")
-          .select("muzakki_id, money_amount, rice_amount_kg, total_members, transaction_date")
-          .eq("period_id", period.id),
-        supabase
-          .from("zakat_mal_transactions")
-          .select("muzakki_id, final_zakat_amount, transaction_date")
-          .eq("period_id", period.id),
-        supabase
-          .from("fidyah_transactions")
-          .select("payer_muzakki_id, cash_amount, food_amount_kg, transaction_date")
-          .eq("period_id", period.id),
-        supabase
-          .from("zakat_distributions")
-          .select("id", { count: "exact", head: true })
-          .eq("period_id", period.id)
-          .eq("status", "distributed"),
-        supabase
-          .from("fidyah_distributions")
-          .select("id", { count: "exact", head: true })
-          .eq("period_id", period.id)
-          .eq("status", "distributed"),
-      ]);
-
-      if (balancesRes.error) throw balancesRes.error;
-      if (fitrahRes.error) throw fitrahRes.error;
-      if (malRes.error) throw malRes.error;
-      if (fidyahRes.error) throw fidyahRes.error;
-      if (zakatDistRes.error) throw zakatDistRes.error;
-      if (fidyahDistRes.error) throw fidyahDistRes.error;
-
-      const balances = (balancesRes.data || []) as FundBalance[];
-      const fitrahTransactions = (fitrahRes.data || []) as ZakatFitrahTx[];
-      const malTransactions = (malRes.data || []) as ZakatMalTx[];
-      const fidyahTransactions = (fidyahRes.data || []) as FidyahTx[];
-
-      const received = {
-        zakatFitrahCash: fitrahTransactions.reduce((sum, tx) => sum + toNumber(tx.money_amount), 0),
-        zakatFitrahRice: fitrahTransactions.reduce((sum, tx) => sum + toNumber(tx.rice_amount_kg), 0),
-        zakatMal: malTransactions.reduce((sum, tx) => sum + toNumber(tx.final_zakat_amount), 0),
-        fidyahCash: fidyahTransactions.reduce((sum, tx) => sum + toNumber(tx.cash_amount), 0),
-        fidyahFood: fidyahTransactions.reduce((sum, tx) => sum + toNumber(tx.food_amount_kg), 0),
-      };
-
-      const balancesByCategory = {
-        zakatFitrahCash: toNumber(balances.find((b) => b.category === "zakat_fitrah_cash")?.total_cash),
-        zakatFitrahRice: toNumber(balances.find((b) => b.category === "zakat_fitrah_rice")?.total_rice_kg),
-        zakatMal: toNumber(balances.find((b) => b.category === "zakat_mal")?.total_cash),
-        fidyahCash: toNumber(balances.find((b) => b.category === "fidyah_cash")?.total_cash),
-        fidyahFood: toNumber(balances.find((b) => b.category === "fidyah_food")?.total_food_kg),
-      };
-
-      const allReceiptTimes = [
-        ...fitrahTransactions.map((tx) => tx.transaction_date),
-        ...malTransactions.map((tx) => tx.transaction_date),
-        ...fidyahTransactions.map((tx) => tx.transaction_date),
-      ];
-
-      const firstReceiptAt = allReceiptTimes.length
-        ? allReceiptTimes.reduce((earliest, current) =>
-            new Date(current).getTime() < new Date(earliest).getTime() ? current : earliest,
-          allReceiptTimes[0])
-        : null;
-
-      const latestReceiptAt = allReceiptTimes.length
-        ? allReceiptTimes.reduce((latest, current) =>
-            new Date(current).getTime() > new Date(latest).getTime() ? current : latest,
-          allReceiptTimes[0])
-        : null;
-
-      const householdIds = new Set<string>();
-      fitrahTransactions.forEach((tx) => {
-        if (tx.muzakki_id) householdIds.add(tx.muzakki_id);
-      });
-      malTransactions.forEach((tx) => {
-        if (tx.muzakki_id) householdIds.add(tx.muzakki_id);
-      });
-      fidyahTransactions.forEach((tx) => {
-        if (tx.payer_muzakki_id) householdIds.add(tx.payer_muzakki_id);
-      });
-
-      const totalJiwaFitrah = fitrahTransactions.reduce(
-        (sum, tx) => sum + Math.max(1, Number(tx.total_members) || 0),
-        0,
-      );
-
-      return {
-        period,
-        received,
-        balances: balancesByCategory,
-        totalMuzakkiHouseholds: householdIds.size,
-        totalJiwaFitrah,
-        totalTransactions: fitrahTransactions.length + malTransactions.length + fidyahTransactions.length,
-        totalDistributions: (zakatDistRes.count || 0) + (fidyahDistRes.count || 0),
-        receiptWindow: {
-          firstReceiptAt,
-          latestReceiptAt,
-          latestByType: {
-            zakatFitrah: getLatestDate(fitrahTransactions),
-            zakatMal: getLatestDate(malTransactions),
-            fidyah: getLatestDate(fidyahTransactions),
-          },
-          firstByType: {
-            zakatFitrah: getEarliestDate(fitrahTransactions),
-            zakatMal: getEarliestDate(malTransactions),
-            fidyah: getEarliestDate(fidyahTransactions),
-          },
-        },
-      };
-    },
-    refetchInterval: 30000,
-  });
-}
-
 export default function PublicTVDashboard() {
-  const { data, isLoading, dataUpdatedAt } = usePublicDashboardData();
+  const { data, isLoading, dataUpdatedAt, refetch } = useDashboardSummary();
+
+  // 🔥 realtime auto refresh
+  useDashboardRealtime(() => {
+    refetch();
+  });
+
   const [currentTime, setCurrentTime] = useState(new Date());
   const [watchingCount, setWatchingCount] = useState(1);
-  const presenceKeyRef = useRef(`tv-${Math.random().toString(36).slice(2)}-${Date.now()}`);
+  const presenceKeyRef = useRef(
+    `tv-${Math.random().toString(36).slice(2)}-${Date.now()}`
+  );
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
+  // 🔥 presence tetap sama
   useEffect(() => {
     const channel = supabase.channel("public-tv-watchers", {
       config: {
@@ -258,7 +94,10 @@ export default function PublicTVDashboard() {
 
     channel.on("presence", { event: "sync" }, () => {
       const state = channel.presenceState();
-      const total = Object.values(state).reduce((sum, items) => sum + items.length, 0);
+      const total = Object.values(state).reduce(
+        (sum, items) => sum + items.length,
+        0
+      );
       setWatchingCount(Math.max(1, total));
     });
 
@@ -266,7 +105,7 @@ export default function PublicTVDashboard() {
       if (status !== "SUBSCRIBED") return;
       await channel.track({
         page: "tv",
-        period_id: data?.period?.id || null,
+        period_id: data?.period.id || null,
         online_at: new Date().toISOString(),
       });
     });
@@ -275,24 +114,96 @@ export default function PublicTVDashboard() {
       void channel.untrack();
       void supabase.removeChannel(channel);
     };
-  }, [data?.period?.id]);
+  }, [data?.period.id]);
+
+  // 🔥 mapping dari summary view
+  const mappedData = useMemo(() => {
+    if (!data) return null;
+  
+    return {
+      period: {
+        id: data.period.id,
+        name: data.period.name,
+        hijri_year: data.period.hijri_year,
+        gregorian_year: data.period.gregorian_year,
+        description: data.period.description,
+        rice_amount_per_person: data.period.rice_amount_per_person,
+        cash_amount_per_person: data.period.cash_amount_per_person,
+        fidyah_daily_rate: data.period.fidyah_daily_rate,
+      },
+  
+      received: {
+        zakatFitrahCash: toNumber(data.received.zakatFitrahCash),
+        zakatFitrahRice: toNumber(data.received.zakatFitrahRice),
+        zakatMal: toNumber(data.received.zakatMal),
+        fidyahCash: toNumber(data.received.fidyahCash),
+        fidyahFood: toNumber(data.received.fidyahFood),
+      },
+  
+      // ⚠️ kalau balance belum ada di RPC → default 0
+      balances: {
+        zakatFitrahCash: 0,
+        zakatFitrahRice: 0,
+        zakatMal: 0,
+        fidyahCash: 0,
+        fidyahFood: 0,
+      },
+  
+      // 🔥 sesuai update kamu
+      totalMuzakkiHouseholds:
+        data.summary.totalTransactionsFitrah || 0,
+  
+      totalJiwaFitrah:
+        data.summary.totalJiwaFitrah || 0,
+  
+      totalTransactions:
+        data.summary.totalTransactions || 0,
+  
+      totalDistributions:
+        data.summary.totalDistributions || 0,
+  
+      receiptWindow: {
+        firstReceiptAt: data.receiptWindow.firstReceiptAt,
+        latestReceiptAt: data.receiptWindow.latestReceiptAt,
+  
+        // ⚠️ belum ada di response → null dulu
+        latestByType: {
+          zakatFitrah: null,
+          zakatMal: null,
+          fidyah: null,
+        },
+      },
+    };
+  }, [data]);
 
   const cashComposition = useMemo(() => {
-    if (!data) return [];
+    if (!mappedData) return [];
     return [
-      { name: "Zakat Fitrah", value: data.received.zakatFitrahCash, color: CASH_COLORS[0] },
-      { name: "Zakat Mal", value: data.received.zakatMal, color: CASH_COLORS[1] },
-      { name: "Fidyah", value: data.received.fidyahCash, color: CASH_COLORS[2] },
+      {
+        name: "Zakat Fitrah",
+        value: mappedData.received.zakatFitrahCash,
+        color: CASH_COLORS[0],
+      },
+      {
+        name: "Zakat Mal",
+        value: mappedData.received.zakatMal,
+        color: CASH_COLORS[1],
+      },
+      {
+        name: "Fidyah",
+        value: mappedData.received.fidyahCash,
+        color: CASH_COLORS[2],
+      },
     ].filter((item) => item.value > 0);
-  }, [data]);
+  }, [mappedData]);
 
   const goodsBars = useMemo(() => {
-    if (!data) return [];
+    if (!mappedData) return [];
     return [
-      { name: "Beras Zakat", value: data.received.zakatFitrahRice },
-      { name: "Makanan Fidyah", value: data.received.fidyahFood },
+      { name: "Beras Zakat", value: mappedData.received.zakatFitrahRice },
+      { name: "Makanan Fidyah", value: mappedData.received.fidyahFood },
     ];
-  }, [data]);
+  }, [mappedData]);
 
   if (isLoading) {
     return (
@@ -305,20 +216,26 @@ export default function PublicTVDashboard() {
     );
   }
 
-  if (!data) {
+  if (!mappedData) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
-        <div className="max-w-xl text-center animate-in fade-in duration-700">
+        <div className="max-w-xl text-center">
           <Calendar className="mx-auto mb-4 h-16 w-16 text-slate-400" />
           <h1 className="text-3xl font-semibold">Belum Ada Periode Aktif</h1>
-          <p className="mt-2 text-slate-300">Aktifkan periode terlebih dahulu untuk menampilkan papan informasi TV.</p>
         </div>
       </div>
     );
   }
 
-  const totalReceivedCash = data.received.zakatFitrahCash + data.received.zakatMal + data.received.fidyahCash;
-  const totalCurrentCashBalance = data.balances.zakatFitrahCash + data.balances.zakatMal + data.balances.fidyahCash;
+  const totalReceivedCash =
+    mappedData.received.zakatFitrahCash +
+    mappedData.received.zakatMal +
+    mappedData.received.fidyahCash;
+
+  const totalCurrentCashBalance =
+    mappedData.balances.zakatFitrahCash +
+    mappedData.balances.zakatMal +
+    mappedData.balances.fidyahCash;
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
@@ -408,7 +325,7 @@ export default function PublicTVDashboard() {
                 <div>
                   <p className="text-xs text-sky-200 md:text-sm">Muzakki Kepala Keluarga</p>
                   <p className="mt-1 text-xl font-semibold text-white md:text-3xl">
-                    {data.totalMuzakkiHouseholds.toLocaleString("id-ID")}
+                    {data.summary.totalTransactionsFitrah.toLocaleString("id-ID")}
                   </p>
                 </div>
                 <div className="rounded-xl bg-sky-400/20 p-2.5 md:p-3">
@@ -424,7 +341,7 @@ export default function PublicTVDashboard() {
                 <div>
                   <p className="text-xs text-cyan-200 md:text-sm">Muzakki Jiwa/Fitrah</p>
                   <p className="mt-1 text-xl font-semibold text-white md:text-3xl">
-                    {data.totalJiwaFitrah.toLocaleString("id-ID")}
+                    {data.summary.totalJiwaFitrah.toLocaleString("id-ID")}
                   </p>
                 </div>
                 <div className="rounded-xl bg-cyan-400/20 p-2.5 md:p-3">
@@ -439,7 +356,7 @@ export default function PublicTVDashboard() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs text-purple-200 md:text-sm">Total Pendistribusian</p>
-                  <p className="mt-1 text-xl font-semibold text-white md:text-3xl">{data.totalDistributions.toLocaleString("id-ID")}</p>
+                  <p className="mt-1 text-xl font-semibold text-white md:text-3xl">{data.summary.totalDistributions.toLocaleString("id-ID")}</p>
                 </div>
                 <div className="rounded-xl bg-purple-400/20 p-2.5 md:p-3">
                   <Package className="h-5 w-5 text-purple-200 md:h-7 md:w-7" />
@@ -504,10 +421,10 @@ export default function PublicTVDashboard() {
                 <p className="text-slate-400">Penerimaan Terakhir</p>
                 <p className="mt-1 font-medium text-slate-100">{formatDateTime(data.receiptWindow.latestReceiptAt)}</p>
               </div>
-              <div className="rounded-xl border border-white/10 bg-slate-800/70 p-3 space-y-2">
+              {/* <div className="rounded-xl border border-white/10 bg-slate-800/70 p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">Zakat Fitrah</span>
-                  <span className="text-slate-100">{formatDateTime(data.receiptWindow.latestByType.zakatFitrah)}</span>
+                  <span className="text-slate-100">{formatDateTime(data.received.)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">Zakat Mal</span>
@@ -517,14 +434,14 @@ export default function PublicTVDashboard() {
                   <span className="text-slate-400">Fidyah</span>
                   <span className="text-slate-100">{formatDateTime(data.receiptWindow.latestByType.fidyah)}</span>
                 </div>
-              </div>
+              </div> */}
               <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/10 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-1 text-cyan-200">
                     <Activity className="h-4 w-4" />
                     Total Transaksi
                   </span>
-                  <span className="font-semibold text-slate-100">{data.totalTransactions.toLocaleString("id-ID")}</span>
+                  <span className="font-semibold text-slate-100">{data.summary.totalTransactions.toLocaleString("id-ID")}</span>
                 </div>
               </div>
             </CardContent>
@@ -585,11 +502,11 @@ export default function PublicTVDashboard() {
               <div className="grid grid-cols-2 gap-2 text-xs md:text-sm">
                 <div className="rounded-lg bg-slate-800/70 p-2">
                   <p className="text-slate-400">Saldo Beras Zakat</p>
-                  <p className="font-semibold">{formatWeight(data.balances.zakatFitrahRice)}</p>
+                  <p className="font-semibold">{formatWeight(data.received.zakatFitrahRice)}</p>
                 </div>
                 <div className="rounded-lg bg-slate-800/70 p-2">
                   <p className="text-slate-400">Saldo Makanan Fidyah</p>
-                  <p className="font-semibold">{formatWeight(data.balances.fidyahFood)}</p>
+                  <p className="font-semibold">{formatWeight(data.received.fidyahFood)}</p>
                 </div>
               </div>
             </CardContent>

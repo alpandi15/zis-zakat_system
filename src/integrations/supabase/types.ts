@@ -1297,6 +1297,10 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_period_active: { Args: { _period_id: string }; Returns: boolean }
+      public_dashboard_summary: {
+        Args: Record<string, never>
+        Returns: Json
+      }
     }
     Enums: {
       app_role:
