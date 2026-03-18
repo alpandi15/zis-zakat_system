@@ -527,7 +527,7 @@ export default function PublicTVDashboard() {
           <span className="text-emerald-200/70">•</span>
           <span className="inline-flex items-center gap-1">
           <Clock3 className="h-3.5 w-3.5" />
-          Live Refresh 30s
+          Live
           </span>
         </span>
       </div>
