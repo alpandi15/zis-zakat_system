@@ -1,6 +1,55 @@
-# Welcome to your Lovable project
+# 🕌 Zakat Fitrah Management App (Open Source)
 
-## Supabase bootstrap admin
+Aplikasi ini adalah platform operasional untuk pengelolaan **Zakat Fitrah** di masjid atau organisasi keislaman.
+
+Dirancang untuk membantu panitia (amil) dalam:
+- Pendataan muzakki & mustahik
+- Pengelolaan distribusi zakat
+- Monitoring dan pelaporan
+- Operasional zakat secara digital & transparan
+
+---
+
+## ⚠️ Disclaimer & Ketentuan Penggunaan
+
+> ❗ **PENTING — HARAP DIBACA SEBELUM MENGGUNAKAN**
+
+Aplikasi ini:
+
+✅ **GRATIS & OPEN SOURCE**  
+✅ **Dibuat khusus untuk kebutuhan masjid / organisasi zakat**  
+
+Namun:
+
+🚫 **TIDAK BOLEH DIGUNAKAN UNTUK TUJUAN KOMERSIAL**  
+🚫 **DILARANG KERAS DIPERJUALBELIKAN DALAM BENTUK APAPUN**  
+
+---
+
+## 🎯 Tujuan Penggunaan
+
+Aplikasi ini **hanya diperuntukkan untuk:**
+- Panitia zakat (amil)
+- Masjid
+- Organisasi sosial / keislaman
+
+---
+
+## 🤝 Kolaborasi & Pengembangan
+
+Silakan:
+- Menggunakan aplikasi ini untuk kebutuhan internal
+- Memodifikasi sesuai kebutuhan organisasi / masjid
+- Berkontribusi untuk pengembangan fitur
+
+💡 **Sangat disarankan untuk berkolaborasi** agar:
+- Fitur semakin lengkap
+- Sistem semakin stabil
+- Bisa menjadi solusi zakat yang lebih baik untuk banyak masjid
+
+---
+
+## 🚀 Supabase Bootstrap Admin
 
 Setelah migration dijalankan, akun admin bootstrap otomatis dibuat jika belum ada `super_admin`:
 
