@@ -165,10 +165,6 @@ Berikut adalah beberapa tampilan utama dari aplikasi Zakat Fitrah Management:
 ### 🧮 Perhitungan Zakat
 <img src="docs/screenshots/perhitungan.png" width="700"/>
 
----
-
-### 📊 Laporan
-<img src="docs/screenshots/laporan.png" width="700"/>
 
 ---
 
@@ -184,3 +180,28 @@ Berikut adalah beberapa tampilan utama dari aplikasi Zakat Fitrah Management:
 
 ### ➕ Input / Create Fitrah
 <img src="docs/screenshots/create-fitrah.png" width="700"/>
+
+## 📸 Tampilan Aplikasi
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/dashboard.png" width="350"/><br/>
+      <b>Dashboard</b>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/fitrah.png" width="350"/><br/>
+      <b>Data Fitrah</b>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/mustahik.png" width="350"/><br/>
+      <b>Mustahik</b>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/laporan.png" width="350"/><br/>
+      <b>Laporan</b>
+    </td>
+  </tr>
+</table>
