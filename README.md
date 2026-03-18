@@ -135,3 +135,52 @@ This project is built with:
 - React
 - shadcn-ui
 - Tailwind CSS
+
+## 📸 Tampilan Aplikasi
+
+Berikut adalah beberapa tampilan utama dari aplikasi Zakat Fitrah Management:
+
+---
+
+### 🏠 Dashboard
+<img src="docs/screenshots/dashboard.png" width="700"/>
+
+---
+
+### 🧾 Data Muzakki / Fitrah
+<img src="docs/screenshots/fitrah.png" width="700"/>
+
+---
+
+### 🍚 Fidyah
+<img src="docs/screenshots/fidyah.png" width="700"/>
+
+---
+
+### 👥 Data Mustahik
+<img src="docs/screenshots/mustahik.png" width="700"/>
+
+---
+
+### 🧮 Perhitungan Zakat
+<img src="docs/screenshots/perhitungan.png" width="700"/>
+
+---
+
+### 📊 Laporan
+<img src="docs/screenshots/laporan.png" width="700"/>
+
+---
+
+### 📅 Periode Zakat
+<img src="docs/screenshots/periode.png" width="700"/>
+
+---
+
+### 📡 Live Monitoring
+<img src="docs/screenshots/live-monitoring.png" width="700"/>
+
+---
+
+### ➕ Input / Create Fitrah
+<img src="docs/screenshots/create-fitrah.png" width="700"/>
