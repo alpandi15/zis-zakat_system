@@ -31,6 +31,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { useDashboardRealtime } from "@/hooks/useDashboardRealtime";
+import { getClientDeviceInfo } from "@/lib/deviceInfo";
 
 const CASH_COLORS = ["#16a34a", "#0ea5e9", "#f59e0b"];
 
@@ -65,6 +66,7 @@ const formatDateTime = (value: string | null): string => {
 
 export default function PublicTVDashboard() {
   const { data, isLoading, dataUpdatedAt, refetch } = useDashboardSummary();
+  const deviceInfo = useMemo(() => getClientDeviceInfo(), []);
 
   // 🔥 realtime auto refresh
   useDashboardRealtime(() => {
@@ -107,6 +109,12 @@ export default function PublicTVDashboard() {
         page: "tv",
         period_id: data?.period.id || null,
         online_at: new Date().toISOString(),
+        device_type: deviceInfo.deviceType,
+        device_label: deviceInfo.deviceLabel,
+        browser: deviceInfo.browser,
+        os: deviceInfo.os,
+        viewport: deviceInfo.viewport,
+        path: typeof window !== "undefined" ? window.location.pathname : "/tv",
       });
     });
 
@@ -114,7 +122,7 @@ export default function PublicTVDashboard() {
       void channel.untrack();
       void supabase.removeChannel(channel);
     };
-  }, [data?.period.id]);
+  }, [data?.period.id, deviceInfo.browser, deviceInfo.deviceLabel, deviceInfo.deviceType, deviceInfo.os, deviceInfo.viewport]);
 
   // 🔥 mapping dari summary view
   const mappedData = useMemo(() => {

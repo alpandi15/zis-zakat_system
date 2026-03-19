@@ -563,6 +563,12 @@ export default function MustahikPage() {
   };
 
   const columns: Column<Mustahik>[] = [
+    {
+      key: "row_number",
+      header: "No.",
+      className: "w-[68px] whitespace-nowrap",
+      render: (_item, index) => <span className="font-medium text-muted-foreground">{index + 1}</span>,
+    },
     { key: "name", header: "Nama", className: 'whitespace-nowrap' },
     {
       key: "asnaf_id",

@@ -15,7 +15,7 @@ import { Search, Plus, FileText, FileSpreadsheet } from "lucide-react";
 export interface Column<T> {
   key: keyof T | string;
   header: string;
-  render?: (item: T) => ReactNode;
+  render?: (item: T, index: number) => ReactNode;
   className?: string;
 }
 
@@ -133,12 +133,12 @@ export function DataTable<T extends { id: string }>({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredData.map((item) => (
+                {filteredData.map((item, index) => (
                   <TableRow key={item.id}>
                     {columns.map((column) => (
                       <TableCell key={String(column.key)} className={column.className}>
                         {column.render
-                          ? column.render(item)
+                          ? column.render(item, index)
                           : String(item[column.key as keyof T] ?? "-")}
                       </TableCell>
                     ))}

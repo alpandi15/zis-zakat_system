@@ -9,6 +9,7 @@ import {
   useMemberZakatData,
   useZakatVsFidyahComparison,
 } from "@/hooks/useDashboardData";
+import { useTvViewerPresence } from "@/hooks/useTvViewerPresence";
 import { PeriodSelector } from "@/components/dashboard/PeriodSelector";
 import { FundComparisonChart } from "@/components/dashboard/FundComparisonChart";
 import { MemberZakatTable } from "@/components/dashboard/MemberZakatTable";
@@ -25,17 +26,32 @@ import {
   Scale,
   Activity,
   ExternalLink,
+  Eye,
+  Monitor,
+  Wifi,
 } from "lucide-react";
 
+const formatDateTime = (value: string | null) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("id-ID", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+};
+
 export default function Dashboard() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isAdmin } = useAuth();
   const router = useRouter();
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
+  const isAdminUser = isAdmin();
 
   const { data: periods, isLoading: periodsLoading } = usePeriods();
   const { data: summary, isLoading: summaryLoading } = usePeriodSummary(selectedPeriod);
   const { data: memberData, isLoading: memberLoading } = useMemberZakatData(selectedPeriod);
   const { data: comparison, isLoading: comparisonLoading } = useZakatVsFidyahComparison(selectedPeriod);
+  const { viewers: tvViewers, viewerCount, isConnected: isTvPresenceConnected } = useTvViewerPresence(isAdminUser);
 
   // Auto-select active period or first period
   useEffect(() => {
@@ -208,6 +224,72 @@ export default function Dashboard() {
             </Card>
           ))}
         </div>
+
+        {isAdminUser && (
+          <Card className="border-border/70 bg-card/70">
+            <CardHeader className="pb-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-1">
+                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                    <Eye className="h-4 w-4 text-primary sm:h-5 sm:w-5" />
+                    Monitoring Viewer Live
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground sm:text-sm">
+                    Khusus admin. Menampilkan perangkat yang sedang membuka halaman live monitoring `/tv`.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline" className="gap-1 rounded-full">
+                    <Monitor className="h-3.5 w-3.5" />
+                    {viewerCount} viewer online
+                  </Badge>
+                  <Badge variant={isTvPresenceConnected ? "default" : "secondary"} className="gap-1 rounded-full">
+                    <Wifi className="h-3.5 w-3.5" />
+                    {isTvPresenceConnected ? "Presence aktif" : "Menghubungkan..."}
+                  </Badge>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {tvViewers.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
+                  Belum ada perangkat yang membuka live monitoring saat ini.
+                </div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                  {tvViewers.map((viewer) => (
+                    <div key={viewer.id} className="rounded-2xl border border-border/70 bg-background/85 p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-foreground">
+                            {viewer.deviceLabel || "Perangkat"}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {viewer.browser || "Browser"} • {viewer.os || "OS"} • {viewer.viewport || "-"}
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="rounded-full">
+                          {viewer.deviceType || "device"}
+                        </Badge>
+                      </div>
+                      <div className="mt-3 space-y-1.5 text-xs text-muted-foreground">
+                        <p>
+                          <span className="font-medium text-foreground">Masuk:</span> {formatDateTime(viewer.onlineAt)}
+                        </p>
+                        <p>
+                          <span className="font-medium text-foreground">Path:</span> {viewer.path || "/tv"}
+                        </p>
+                        <p className="truncate">
+                          <span className="font-medium text-foreground">Periode:</span> {viewer.periodId || "-"}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <FundComparisonChart data={comparison} isLoading={comparisonLoading} />
         <MemberZakatTable
