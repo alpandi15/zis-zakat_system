@@ -27,7 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Calculator, Coins, Wheat, Utensils, Scale, ArrowRight, Sparkles, Lock, Info } from "lucide-react";
+import { Calculator, Coins, Wheat, Utensils, Scale, ArrowRight, Sparkles, Lock, Info, RotateCcw } from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { compareMustahikRoute } from "@/lib/mustahikRoute";
@@ -125,6 +125,11 @@ interface PackagingSummary {
   };
 }
 
+interface PackagingRecipientCountOverrides {
+  amilCount: number;
+  nonAmilCount: number;
+}
+
 interface PackagingSourceItem {
   mustahikId: string;
   fundCategory: FundCategory;
@@ -212,6 +217,36 @@ const createEmptyPackagingSummary = (): PackagingSummary => ({
     fidyahCash: 0,
   },
 });
+
+const clampRecipientCount = (value: number) => Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+
+const applyPackagingRecipientCountOverrides = (
+  summary: PackagingSummary,
+  overrides: PackagingRecipientCountOverrides,
+): PackagingSummary => {
+  const amilCount = clampRecipientCount(overrides.amilCount);
+  const nonAmilCount = clampRecipientCount(overrides.nonAmilCount);
+
+  return {
+    ...summary,
+    groupBreakdown: {
+      amil: {
+        ...summary.groupBreakdown.amil,
+        recipientCount: amilCount,
+        averageCashPerRecipient: amilCount > 0 ? summary.groupBreakdown.amil.totalCash / amilCount : 0,
+        averageRicePerRecipient: amilCount > 0 ? summary.groupBreakdown.amil.totalRiceKg / amilCount : 0,
+        averageFoodPerRecipient: amilCount > 0 ? summary.groupBreakdown.amil.totalFoodKg / amilCount : 0,
+      },
+      nonAmil: {
+        ...summary.groupBreakdown.nonAmil,
+        recipientCount: nonAmilCount,
+        averageCashPerRecipient: nonAmilCount > 0 ? summary.groupBreakdown.nonAmil.totalCash / nonAmilCount : 0,
+        averageRicePerRecipient: nonAmilCount > 0 ? summary.groupBreakdown.nonAmil.totalRiceKg / nonAmilCount : 0,
+        averageFoodPerRecipient: nonAmilCount > 0 ? summary.groupBreakdown.nonAmil.totalFoodKg / nonAmilCount : 0,
+      },
+    },
+  };
+};
 
 const buildPackagingSummary = (
   items: PackagingSourceItem[],
@@ -379,6 +414,8 @@ export default function Calculations() {
   const [batchNotes, setBatchNotes] = useState("");
   const [isPackagingDetailOpen, setIsPackagingDetailOpen] = useState(false);
   const [packagingDetailTab, setPackagingDetailTab] = useState<"asnaf" | "mustahik">("asnaf");
+  const [packagingAmilCountInput, setPackagingAmilCountInput] = useState("0");
+  const [packagingNonAmilCountInput, setPackagingNonAmilCountInput] = useState("0");
 
   const periodMode = normalizeAmilMode(selectedPeriod?.amil_distribution_mode);
   const periodShareFactor = normalizeAmilShareFactor(selectedPeriod?.amil_share_factor);
@@ -621,6 +658,24 @@ export default function Calculations() {
   const demoPercentageRice = Number((sampleRiceKg * demoPercentageShare).toFixed(2));
   const demoProportionalRice = Number((sampleRiceKg * demoProportionalShare).toFixed(2));
 
+  const defaultPackagingAmilCount = amilCount;
+  const defaultPackagingNonAmilCount = beneficiaryCount;
+
+  useEffect(() => {
+    setPackagingAmilCountInput(
+      String(selectedPeriod?.packaging_amil_count_override ?? defaultPackagingAmilCount),
+    );
+    setPackagingNonAmilCountInput(
+      String(selectedPeriod?.packaging_non_amil_count_override ?? defaultPackagingNonAmilCount),
+    );
+  }, [
+    selectedPeriod?.id,
+    selectedPeriod?.packaging_amil_count_override,
+    selectedPeriod?.packaging_non_amil_count_override,
+    defaultPackagingAmilCount,
+    defaultPackagingNonAmilCount,
+  ]);
+
   const mustahikMetaMap = useMemo(
     () =>
       new Map(
@@ -639,7 +694,7 @@ export default function Calculations() {
     [mustahikList],
   );
 
-  const overallPackagingSummary = useMemo(() => {
+  const baseOverallPackagingSummary = useMemo(() => {
     const overallItems: PackagingSourceItem[] = [];
     const pushRecipients = (
       fundCategory: FundCategory,
@@ -675,6 +730,26 @@ export default function Calculations() {
     return buildPackagingSummary(overallItems, mustahikMetaMap);
   }, [calculations, mustahikMetaMap]);
 
+  const parsedPackagingAmilCount = clampRecipientCount(Number(packagingAmilCountInput || 0));
+  const parsedPackagingNonAmilCount = clampRecipientCount(Number(packagingNonAmilCountInput || 0));
+
+  const hasPackagingCountOverride =
+    selectedPeriod?.packaging_amil_count_override !== null ||
+    selectedPeriod?.packaging_non_amil_count_override !== null;
+
+  const isPackagingCountChanged =
+    parsedPackagingAmilCount !== (selectedPeriod?.packaging_amil_count_override ?? defaultPackagingAmilCount) ||
+    parsedPackagingNonAmilCount !== (selectedPeriod?.packaging_non_amil_count_override ?? defaultPackagingNonAmilCount);
+
+  const overallPackagingSummary = useMemo(
+    () =>
+      applyPackagingRecipientCountOverrides(baseOverallPackagingSummary, {
+        amilCount: parsedPackagingAmilCount,
+        nonAmilCount: parsedPackagingNonAmilCount,
+      }),
+    [baseOverallPackagingSummary, parsedPackagingAmilCount, parsedPackagingNonAmilCount],
+  );
+
   const saveDistributionConfigMutation = useMutation({
     mutationFn: async () => {
       if (!selectedPeriod?.id) throw new Error("Periode belum dipilih");
@@ -695,6 +770,34 @@ export default function Calculations() {
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Gagal menyimpan konfigurasi", description: error.message });
+    },
+  });
+
+  const savePackagingCountMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedPeriod?.id) throw new Error("Periode belum dipilih");
+
+      const packagingAmilValue =
+        parsedPackagingAmilCount === defaultPackagingAmilCount ? null : parsedPackagingAmilCount;
+      const packagingNonAmilValue =
+        parsedPackagingNonAmilCount === defaultPackagingNonAmilCount ? null : parsedPackagingNonAmilCount;
+
+      const { error } = await supabase
+        .from("periods")
+        .update({
+          packaging_amil_count_override: packagingAmilValue,
+          packaging_non_amil_count_override: packagingNonAmilValue,
+        })
+        .eq("id", selectedPeriod.id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["periods"] });
+      toast({ title: "Jumlah pembungkusan berhasil disimpan" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Gagal menyimpan jumlah pembungkusan", description: error.message });
     },
   });
 
@@ -1079,6 +1182,91 @@ export default function Calculations() {
                 <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
                   <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Makanan Fidyah</p>
                   <p className="mt-1 text-base font-semibold">{overallPackagingSummary.totals.totalFoodKg.toFixed(2)} kg</p>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-border/70 bg-background/90 p-4 shadow-sm">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">Jumlah Paket Pembungkusan</p>
+                    <p className="text-xs text-muted-foreground">
+                      Default mengambil data mustahik aktif. Ubah jumlah amil dan non-amil bila pembagian lapangan
+                      perlu dihitung lebih cepat tanpa menginput semua mustahik terlebih dahulu.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {hasPackagingCountOverride && (
+                      <Badge variant="outline" className="rounded-full border-amber-300 bg-amber-50 px-3 py-1 text-amber-700">
+                        Override tersimpan
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="rounded-full border-border/70 bg-muted/40 px-3 py-1 text-muted-foreground">
+                      Default: {defaultPackagingAmilCount} amil • {defaultPackagingNonAmilCount} non-amil
+                    </Badge>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,220px)_1fr]">
+                  <div className="rounded-2xl border border-emerald-200/70 bg-emerald-50/60 p-3">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-700">Jumlah Amil</p>
+                    <Input
+                      min={0}
+                      type="number"
+                      inputMode="numeric"
+                      value={packagingAmilCountInput}
+                      disabled={isReadOnly}
+                      onChange={(event) => setPackagingAmilCountInput(event.target.value)}
+                      className="mt-2 h-11 rounded-xl border-emerald-200/80 bg-white"
+                    />
+                    <p className="mt-2 text-[11px] text-emerald-700/80">
+                      Dipakai untuk hitung rata-rata uang, beras, dan fidyah makanan per amil.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-sky-200/70 bg-sky-50/60 p-3">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-sky-700">Jumlah Non-Amil</p>
+                    <Input
+                      min={0}
+                      type="number"
+                      inputMode="numeric"
+                      value={packagingNonAmilCountInput}
+                      disabled={isReadOnly}
+                      onChange={(event) => setPackagingNonAmilCountInput(event.target.value)}
+                      className="mt-2 h-11 rounded-xl border-sky-200/80 bg-white"
+                    />
+                    <p className="mt-2 text-[11px] text-sky-700/80">
+                      Dipakai untuk hitung rata-rata paket mustahik non-amil dari total keseluruhan.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border/70 bg-muted/20 p-3">
+                    <p className="text-xs font-medium text-foreground">Perilaku hitungan</p>
+                    <p className="mt-1 text-xs leading-6 text-muted-foreground">
+                      Total uang, beras, dan fidyah tetap mengikuti saldo distribusi periode aktif. Yang diubah hanya
+                      jumlah orang untuk kebutuhan pembungkusan cepat, sehingga nilai per orang langsung menyesuaikan.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={isReadOnly || !selectedPeriod?.id || !isPackagingCountChanged || savePackagingCountMutation.isPending}
+                        onClick={() => savePackagingCountMutation.mutate()}
+                      >
+                        {savePackagingCountMutation.isPending ? "Menyimpan..." : "Simpan Jumlah"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isReadOnly}
+                        onClick={() => {
+                          setPackagingAmilCountInput(String(defaultPackagingAmilCount));
+                          setPackagingNonAmilCountInput(String(defaultPackagingNonAmilCount));
+                        }}
+                      >
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                        Kembali ke Data Mustahik
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
 

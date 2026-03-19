@@ -734,6 +734,8 @@ export type Database = {
           name: string
           nisab_gold_price_per_gram: number | null
           nisab_silver_price_per_gram: number | null
+          packaging_amil_count_override: number | null
+          packaging_non_amil_count_override: number | null
           rice_amount_per_person: number | null
           start_date: string | null
           status: Database["public"]["Enums"]["period_status"]
@@ -756,6 +758,8 @@ export type Database = {
           name: string
           nisab_gold_price_per_gram?: number | null
           nisab_silver_price_per_gram?: number | null
+          packaging_amil_count_override?: number | null
+          packaging_non_amil_count_override?: number | null
           rice_amount_per_person?: number | null
           start_date?: string | null
           status?: Database["public"]["Enums"]["period_status"]
@@ -778,6 +782,8 @@ export type Database = {
           name?: string
           nisab_gold_price_per_gram?: number | null
           nisab_silver_price_per_gram?: number | null
+          packaging_amil_count_override?: number | null
+          packaging_non_amil_count_override?: number | null
           rice_amount_per_person?: number | null
           start_date?: string | null
           status?: Database["public"]["Enums"]["period_status"]

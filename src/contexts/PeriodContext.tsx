@@ -19,6 +19,8 @@ interface Period {
   nisab_silver_price_per_gram: number | null;
   amil_distribution_mode: "percentage" | "proportional_with_factor" | null;
   amil_share_factor: number | null;
+  packaging_amil_count_override: number | null;
+  packaging_non_amil_count_override: number | null;
 }
 
 interface PeriodContextType {
