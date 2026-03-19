@@ -23,6 +23,7 @@ import { formatCurrency } from "@/lib/formatCurrency";
 import { useDistributionCalculation, type AmilDistributionMode } from "@/hooks/useDistributionCalculation";
 import { useAsnafSettings } from "@/hooks/useAsnafSettings";
 import { compareMustahikRoute, formatMustahikRoute } from "@/lib/mustahikRoute";
+import { CreatableSingleSelect } from "@/components/shared/CreatableSingleSelect";
 
 interface DistributionPreviewTabProps {
   periodId: string;
@@ -56,6 +57,8 @@ export function DistributionPreviewTab({
   amilShareFactor,
 }: DistributionPreviewTabProps) {
   const [selectedRecipient, setSelectedRecipient] = useState<RecipientPreview | null>(null);
+  const [rtFilter, setRtFilter] = useState("");
+  const [laneFilter, setLaneFilter] = useState("");
   const { getLabel } = useAsnafSettings();
 
   // Fetch fund balances
@@ -226,6 +229,35 @@ export function DistributionPreviewTab({
       });
   }, [mustahikList, calculations]);
 
+  const rtOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        previewData
+          .map((recipient) => recipient.distribution_rt?.trim() || "")
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "id"));
+  }, [previewData]);
+
+  const laneOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        previewData
+          .filter((recipient) => !rtFilter || (recipient.distribution_rt?.trim() || "") === rtFilter)
+          .map((recipient) => recipient.distribution_lane?.trim() || "")
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "id"));
+  }, [previewData, rtFilter]);
+
+  const filteredPreviewData = useMemo(() => {
+    return previewData.filter((recipient) => {
+      const matchesRt = !rtFilter || (recipient.distribution_rt?.trim() || "") === rtFilter;
+      const matchesLane = !laneFilter || (recipient.distribution_lane?.trim() || "") === laneFilter;
+      return matchesRt && matchesLane;
+    });
+  }, [previewData, rtFilter, laneFilter]);
+
   // Calculate totals
   const totals = useMemo(() => {
     const amilData = previewData.filter(r => r.isAmil);
@@ -351,9 +383,59 @@ export function DistributionPreviewTab({
         </CardDescription>
         </CardHeader>
         <CardContent>
-          {previewData.length === 0 ? (
+          <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,220px)_1fr]">
+            <CreatableSingleSelect
+              value={rtFilter}
+              onChange={(nextValue) => {
+                setRtFilter(nextValue);
+                setLaneFilter("");
+              }}
+              options={rtOptions}
+              allowCreate={false}
+              placeholder="Semua RT / Wilayah"
+              searchPlaceholder="Cari RT / wilayah..."
+              emptyLabel="Belum ada RT / wilayah"
+              helperText="Saring simulasi penerima berdasarkan RT."
+            />
+            <CreatableSingleSelect
+              value={laneFilter}
+              onChange={setLaneFilter}
+              options={laneOptions}
+              allowCreate={false}
+              placeholder="Semua Gang / Jalur"
+              searchPlaceholder="Cari gang / jalur..."
+              emptyLabel={rtFilter ? "Belum ada gang pada RT ini" : "Belum ada gang / jalur"}
+              helperText="Opsi gang mengikuti RT yang dipilih."
+            />
+            <div className="flex items-center justify-between rounded-2xl border border-border/70 bg-muted/30 px-4 py-3 text-sm">
+              <div>
+                <p className="font-medium text-foreground">Hasil Simulasi</p>
+                <p className="text-xs text-muted-foreground">
+                  Menampilkan {filteredPreviewData.length} dari {previewData.length} penerima.
+                </p>
+              </div>
+              {(rtFilter || laneFilter) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-xl"
+                  onClick={() => {
+                    setRtFilter("");
+                    setLaneFilter("");
+                  }}
+                >
+                  Reset filter
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {filteredPreviewData.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">
-              Tidak ada penerima yang layak terima atau saldo dana kosong
+              {previewData.length === 0
+                ? "Tidak ada penerima yang layak terima atau saldo dana kosong"
+                : "Tidak ada penerima yang cocok dengan filter wilayah"}
             </p>
           ) : (
             <Table>
@@ -369,7 +451,7 @@ export function DistributionPreviewTab({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {previewData.map(r => (
+                {filteredPreviewData.map(r => (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{r.name}</TableCell>
                     <TableCell>
