@@ -26,6 +26,7 @@ export interface DashboardSummary {
 
   summary: {
     totalTransactionsFitrah: number;
+    totalMuzakkiHouseholds?: number;
     totalTransactions: number;
     totalJiwaFitrah: number;
     totalDistributions: number;

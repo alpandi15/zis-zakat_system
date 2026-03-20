@@ -7,6 +7,7 @@ import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
 import { useAsnafSettings } from "@/hooks/useAsnafSettings";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { useDistributionCalculation, type AmilDistributionMode } from "@/hooks/useDistributionCalculation";
+import { usePeriodSummary } from "@/hooks/useDashboardData";
 import type { Enums, TablesInsert } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/formatCurrency";
@@ -37,13 +38,6 @@ interface FundBalance {
   total_cash: number;
   total_rice_kg: number;
   total_food_kg: number;
-}
-
-interface FundLedgerRow {
-  category: FundCategory;
-  amount_cash: number | null;
-  amount_rice_kg: number | null;
-  amount_food_kg: number | null;
 }
 
 interface LockedBatchItemRow {
@@ -128,6 +122,15 @@ interface PackagingSummary {
 interface PackagingRecipientCountOverrides {
   amilCount: number;
   nonAmilCount: number;
+}
+
+interface PackagingGroupBreakdownOptions {
+  totals: PackagingSummary["totals"];
+  amilCount: number;
+  nonAmilCount: number;
+  amilDistributionMode: AmilDistributionMode;
+  amilShareFactor: number;
+  amilPercentage: number;
 }
 
 interface PackagingSourceItem {
@@ -220,31 +223,148 @@ const createEmptyPackagingSummary = (): PackagingSummary => ({
 
 const clampRecipientCount = (value: number) => Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
 
+const floorAverage = (total: number, recipientCount: number, scale = 1) => {
+  if (recipientCount <= 0 || total <= 0) return 0;
+  const scaledTotal = Math.max(0, Math.round(total * scale));
+  return Math.floor(scaledTotal / recipientCount) / scale;
+};
+
+const splitPackagingPortions = (
+  totalAmount: number,
+  amilCount: number,
+  nonAmilCount: number,
+  mode: AmilDistributionMode,
+  factor: number,
+  percentage: number,
+  scale = 1,
+) => {
+  const safeTotal = Math.max(0, totalAmount);
+  const scaledTotal = Math.max(0, Math.round(safeTotal * scale));
+
+  if (scaledTotal <= 0) {
+    return { amilTotal: 0, nonAmilTotal: 0 };
+  }
+
+  if (amilCount <= 0) {
+    return { amilTotal: 0, nonAmilTotal: scaledTotal / scale };
+  }
+
+  if (nonAmilCount <= 0) {
+    return { amilTotal: scaledTotal / scale, nonAmilTotal: 0 };
+  }
+
+  let amilScaled = 0;
+
+  if (mode === "proportional_with_factor") {
+    const recipientTotal = amilCount + nonAmilCount;
+    const basePerRecipientScaled = recipientTotal > 0 ? Math.floor(scaledTotal / recipientTotal) : 0;
+    const amilPerRecipientScaled = Math.floor(basePerRecipientScaled * factor);
+    amilScaled = Math.min(scaledTotal, Math.max(0, amilPerRecipientScaled * amilCount));
+  } else {
+    amilScaled = Math.min(scaledTotal, Math.max(0, Math.floor(scaledTotal * percentage)));
+  }
+
+  amilScaled = Math.min(amilScaled, Math.floor(scaledTotal / 2));
+
+  const nonAmilScaled = Math.max(0, scaledTotal - amilScaled);
+
+  return {
+    amilTotal: amilScaled / scale,
+    nonAmilTotal: nonAmilScaled / scale,
+  };
+};
+
+const buildPackagingGroupBreakdown = ({
+  totals,
+  amilCount,
+  nonAmilCount,
+  amilDistributionMode,
+  amilShareFactor,
+  amilPercentage,
+}: PackagingGroupBreakdownOptions): PackagingSummary["groupBreakdown"] => {
+  const safeAmilCount = clampRecipientCount(amilCount);
+  const safeNonAmilCount = clampRecipientCount(nonAmilCount);
+
+  const zakatFitrahCashSplit = splitPackagingPortions(
+    totals.zakatFitrahCash,
+    safeAmilCount,
+    safeNonAmilCount,
+    amilDistributionMode,
+    amilShareFactor,
+    amilPercentage,
+    1,
+  );
+
+  const zakatMalCashSplit = splitPackagingPortions(
+    totals.zakatMalCash,
+    safeAmilCount,
+    safeNonAmilCount,
+    amilDistributionMode,
+    amilShareFactor,
+    amilPercentage,
+    1,
+  );
+
+  const zakatFitrahRiceSplit = splitPackagingPortions(
+    totals.totalRiceKg,
+    safeAmilCount,
+    safeNonAmilCount,
+    amilDistributionMode,
+    amilShareFactor,
+    amilPercentage,
+    100,
+  );
+
+  const amilTotalCash = zakatFitrahCashSplit.amilTotal + zakatMalCashSplit.amilTotal;
+  const nonAmilTotalCash =
+    zakatFitrahCashSplit.nonAmilTotal + zakatMalCashSplit.nonAmilTotal + Math.max(0, totals.fidyahCash);
+  const amilTotalRiceKg = zakatFitrahRiceSplit.amilTotal;
+  const nonAmilTotalRiceKg = zakatFitrahRiceSplit.nonAmilTotal;
+  const nonAmilTotalFoodKg = Math.max(0, totals.totalFoodKg);
+
+  return {
+    amil: {
+      recipientCount: safeAmilCount,
+      totalCash: amilTotalCash,
+      totalRiceKg: amilTotalRiceKg,
+      totalFoodKg: 0,
+      zakatFitrahCash: zakatFitrahCashSplit.amilTotal,
+      zakatMalCash: zakatMalCashSplit.amilTotal,
+      fidyahCash: 0,
+      averageCashPerRecipient: floorAverage(amilTotalCash, safeAmilCount, 1),
+      averageRicePerRecipient: floorAverage(amilTotalRiceKg, safeAmilCount, 100),
+      averageFoodPerRecipient: 0,
+    },
+    nonAmil: {
+      recipientCount: safeNonAmilCount,
+      totalCash: nonAmilTotalCash,
+      totalRiceKg: nonAmilTotalRiceKg,
+      totalFoodKg: nonAmilTotalFoodKg,
+      zakatFitrahCash: zakatFitrahCashSplit.nonAmilTotal,
+      zakatMalCash: zakatMalCashSplit.nonAmilTotal,
+      fidyahCash: Math.max(0, totals.fidyahCash),
+      averageCashPerRecipient: floorAverage(nonAmilTotalCash, safeNonAmilCount, 1),
+      averageRicePerRecipient: floorAverage(nonAmilTotalRiceKg, safeNonAmilCount, 100),
+      averageFoodPerRecipient: floorAverage(nonAmilTotalFoodKg, safeNonAmilCount, 100),
+    },
+  };
+};
+
 const applyPackagingRecipientCountOverrides = (
   summary: PackagingSummary,
   overrides: PackagingRecipientCountOverrides,
+  options: Omit<PackagingGroupBreakdownOptions, "amilCount" | "nonAmilCount">,
 ): PackagingSummary => {
   const amilCount = clampRecipientCount(overrides.amilCount);
   const nonAmilCount = clampRecipientCount(overrides.nonAmilCount);
 
   return {
     ...summary,
-    groupBreakdown: {
-      amil: {
-        ...summary.groupBreakdown.amil,
-        recipientCount: amilCount,
-        averageCashPerRecipient: amilCount > 0 ? summary.groupBreakdown.amil.totalCash / amilCount : 0,
-        averageRicePerRecipient: amilCount > 0 ? summary.groupBreakdown.amil.totalRiceKg / amilCount : 0,
-        averageFoodPerRecipient: amilCount > 0 ? summary.groupBreakdown.amil.totalFoodKg / amilCount : 0,
-      },
-      nonAmil: {
-        ...summary.groupBreakdown.nonAmil,
-        recipientCount: nonAmilCount,
-        averageCashPerRecipient: nonAmilCount > 0 ? summary.groupBreakdown.nonAmil.totalCash / nonAmilCount : 0,
-        averageRicePerRecipient: nonAmilCount > 0 ? summary.groupBreakdown.nonAmil.totalRiceKg / nonAmilCount : 0,
-        averageFoodPerRecipient: nonAmilCount > 0 ? summary.groupBreakdown.nonAmil.totalFoodKg / nonAmilCount : 0,
-      },
-    },
+    groupBreakdown: buildPackagingGroupBreakdown({
+      amilCount,
+      nonAmilCount,
+      ...options,
+    }),
   };
 };
 
@@ -450,22 +570,7 @@ export default function Calculations() {
     },
   });
 
-  const { data: inflowRows = [] } = useQuery({
-    queryKey: ["fund-inflow-for-batch", selectedPeriod?.id],
-    queryFn: async () => {
-      if (!selectedPeriod?.id) return [];
-
-      const { data, error } = await supabase
-        .from("fund_ledger")
-        .select("category, amount_cash, amount_rice_kg, amount_food_kg")
-        .eq("period_id", selectedPeriod.id)
-        .in("transaction_type", ["collection", "adjustment", "transfer_in"]);
-
-      if (error) throw error;
-      return data as FundLedgerRow[];
-    },
-    enabled: !!selectedPeriod?.id,
-  });
+  const { data: periodSummary } = usePeriodSummary(selectedPeriod?.id || null);
 
   const { data: lockedBatchItems = [] } = useQuery({
     queryKey: ["distribution-batch-items-for-lock-balance", selectedPeriod?.id],
@@ -502,20 +607,22 @@ export default function Calculations() {
     enabled: !!selectedPeriod?.id,
   });
 
-  const inflowBalanceMap = useMemo(() => {
+  const receivedBalanceMap = useMemo(() => {
     const map = createEmptyBalanceMap();
+    const fitrahCash = map.get("zakat_fitrah_cash");
+    const fitrahRice = map.get("zakat_fitrah_rice");
+    const zakatMal = map.get("zakat_mal");
+    const fidyahCash = map.get("fidyah_cash");
+    const fidyahFood = map.get("fidyah_food");
 
-    inflowRows.forEach((row) => {
-      const current = map.get(row.category);
-      if (!current) return;
-
-      current.total_cash += Math.max(0, Number(row.amount_cash || 0));
-      current.total_rice_kg += Math.max(0, Number(row.amount_rice_kg || 0));
-      current.total_food_kg += Math.max(0, Number(row.amount_food_kg || 0));
-    });
+    if (fitrahCash) fitrahCash.total_cash = Math.max(0, Number(periodSummary?.zakat_fitrah_cash || 0));
+    if (fitrahRice) fitrahRice.total_rice_kg = Math.max(0, Number(periodSummary?.zakat_fitrah_rice_kg || 0));
+    if (zakatMal) zakatMal.total_cash = Math.max(0, Number(periodSummary?.zakat_mal || 0));
+    if (fidyahCash) fidyahCash.total_cash = Math.max(0, Number(periodSummary?.fidyah_cash || 0));
+    if (fidyahFood) fidyahFood.total_food_kg = Math.max(0, Number(periodSummary?.fidyah_food_kg || 0));
 
     return map;
-  }, [inflowRows]);
+  }, [periodSummary]);
 
   const lockedBalanceMap = useMemo(() => {
     const map = createEmptyBalanceMap();
@@ -536,7 +643,7 @@ export default function Calculations() {
 
   const availableForNextBatch = useMemo(() => {
     return FUND_CATEGORIES.map((category) => {
-      const inflow = inflowBalanceMap.get(category) || {
+      const inflow = receivedBalanceMap.get(category) || {
         category,
         total_cash: 0,
         total_rice_kg: 0,
@@ -556,9 +663,50 @@ export default function Calculations() {
         total_food_kg: Math.max(0, inflow.total_food_kg - locked.total_food_kg),
       };
     });
-  }, [inflowBalanceMap, lockedBalanceMap]);
+  }, [receivedBalanceMap, lockedBalanceMap]);
+
+  const overallAvailableBalances = useMemo(() => {
+    return [
+      {
+        category: "zakat_fitrah_cash" as FundCategory,
+        total_cash: Math.max(0, Number(periodSummary?.zakat_fitrah_cash || 0)),
+        total_rice_kg: 0,
+        total_food_kg: 0,
+      },
+      {
+        category: "zakat_fitrah_rice" as FundCategory,
+        total_cash: 0,
+        total_rice_kg: Math.max(0, Number(periodSummary?.zakat_fitrah_rice_kg || 0)),
+        total_food_kg: 0,
+      },
+      {
+        category: "zakat_mal" as FundCategory,
+        total_cash: Math.max(0, Number(periodSummary?.zakat_mal || 0)),
+        total_rice_kg: 0,
+        total_food_kg: 0,
+      },
+      {
+        category: "fidyah_cash" as FundCategory,
+        total_cash: Math.max(0, Number(periodSummary?.fidyah_cash || 0)),
+        total_rice_kg: 0,
+        total_food_kg: 0,
+      },
+      {
+        category: "fidyah_food" as FundCategory,
+        total_cash: 0,
+        total_rice_kg: 0,
+        total_food_kg: Math.max(0, Number(periodSummary?.fidyah_food_kg || 0)),
+      },
+    ];
+  }, [periodSummary]);
 
   const calculations = useDistributionCalculation(mustahikList, availableForNextBatch, [], {
+    amilDistributionMode,
+    amilShareFactor,
+    excludeExistingDistributed: false,
+  });
+
+  const overallCalculations = useDistributionCalculation(mustahikList, overallAvailableBalances, [], {
     amilDistributionMode,
     amilShareFactor,
     excludeExistingDistributed: false,
@@ -581,7 +729,7 @@ export default function Calculations() {
         total_rice_kg: 0,
         total_food_kg: 0,
       };
-      const inflow = inflowBalanceMap.get(category) || { total_cash: 0, total_rice_kg: 0, total_food_kg: 0 };
+      const inflow = receivedBalanceMap.get(category) || { total_cash: 0, total_rice_kg: 0, total_food_kg: 0 };
       const locked = lockedBalanceMap.get(category) || { total_cash: 0, total_rice_kg: 0, total_food_kg: 0 };
 
       const availableValue =
@@ -612,7 +760,7 @@ export default function Calculations() {
         mustahikRecipients: summary.beneficiaries.length,
       };
     });
-  }, [calculations, availableForNextBatch, inflowBalanceMap, lockedBalanceMap]);
+  }, [calculations, availableForNextBatch, receivedBalanceMap, lockedBalanceMap]);
 
   const totalAvailableCash = useMemo(
     () => availableForNextBatch.reduce((sum, item) => sum + Number(item.total_cash || 0), 0),
@@ -658,8 +806,8 @@ export default function Calculations() {
   const demoPercentageRice = Number((sampleRiceKg * demoPercentageShare).toFixed(2));
   const demoProportionalRice = Number((sampleRiceKg * demoProportionalShare).toFixed(2));
 
-  const defaultPackagingAmilCount = amilCount;
-  const defaultPackagingNonAmilCount = beneficiaryCount;
+  const defaultPackagingAmilCount = overallCalculations.amilList.length;
+  const defaultPackagingNonAmilCount = overallCalculations.beneficiaryList.length;
 
   useEffect(() => {
     setPackagingAmilCountInput(
@@ -698,7 +846,7 @@ export default function Calculations() {
     const overallItems: PackagingSourceItem[] = [];
     const pushRecipients = (
       fundCategory: FundCategory,
-      recipients: typeof calculations.zakatFitrahCash.amil,
+      recipients: typeof overallCalculations.zakatFitrahCash.amil,
       isAmil: boolean,
     ) => {
       recipients.forEach((recipient) => {
@@ -716,19 +864,19 @@ export default function Calculations() {
       });
     };
 
-    pushRecipients("zakat_fitrah_cash", calculations.zakatFitrahCash.amil, true);
-    pushRecipients("zakat_fitrah_cash", calculations.zakatFitrahCash.beneficiaries, false);
-    pushRecipients("zakat_fitrah_rice", calculations.zakatFitrahRice.amil, true);
-    pushRecipients("zakat_fitrah_rice", calculations.zakatFitrahRice.beneficiaries, false);
-    pushRecipients("zakat_mal", calculations.zakatMal.amil, true);
-    pushRecipients("zakat_mal", calculations.zakatMal.beneficiaries, false);
-    pushRecipients("fidyah_cash", calculations.fidyahCash.amil, true);
-    pushRecipients("fidyah_cash", calculations.fidyahCash.beneficiaries, false);
-    pushRecipients("fidyah_food", calculations.fidyahFood.amil, true);
-    pushRecipients("fidyah_food", calculations.fidyahFood.beneficiaries, false);
+    pushRecipients("zakat_fitrah_cash", overallCalculations.zakatFitrahCash.amil, true);
+    pushRecipients("zakat_fitrah_cash", overallCalculations.zakatFitrahCash.beneficiaries, false);
+    pushRecipients("zakat_fitrah_rice", overallCalculations.zakatFitrahRice.amil, true);
+    pushRecipients("zakat_fitrah_rice", overallCalculations.zakatFitrahRice.beneficiaries, false);
+    pushRecipients("zakat_mal", overallCalculations.zakatMal.amil, true);
+    pushRecipients("zakat_mal", overallCalculations.zakatMal.beneficiaries, false);
+    pushRecipients("fidyah_cash", overallCalculations.fidyahCash.amil, true);
+    pushRecipients("fidyah_cash", overallCalculations.fidyahCash.beneficiaries, false);
+    pushRecipients("fidyah_food", overallCalculations.fidyahFood.amil, true);
+    pushRecipients("fidyah_food", overallCalculations.fidyahFood.beneficiaries, false);
 
     return buildPackagingSummary(overallItems, mustahikMetaMap);
-  }, [calculations, mustahikMetaMap]);
+  }, [mustahikMetaMap, overallCalculations]);
 
   const parsedPackagingAmilCount = clampRecipientCount(Number(packagingAmilCountInput || 0));
   const parsedPackagingNonAmilCount = clampRecipientCount(Number(packagingNonAmilCountInput || 0));
@@ -741,13 +889,38 @@ export default function Calculations() {
     parsedPackagingAmilCount !== (selectedPeriod?.packaging_amil_count_override ?? defaultPackagingAmilCount) ||
     parsedPackagingNonAmilCount !== (selectedPeriod?.packaging_non_amil_count_override ?? defaultPackagingNonAmilCount);
 
+  const overallPackagingTotals = useMemo(
+    () => ({
+      totalCash: Number(periodSummary?.total_combined_cash || 0),
+      zakatFitrahCash: Number(periodSummary?.zakat_fitrah_cash || 0),
+      zakatMalCash: Number(periodSummary?.zakat_mal || 0),
+      fidyahCash: Number(periodSummary?.fidyah_cash || 0),
+      totalRiceKg: Number(periodSummary?.zakat_fitrah_rice_kg || 0),
+      totalFoodKg: Number(periodSummary?.fidyah_food_kg || 0),
+    }),
+    [periodSummary],
+  );
+
   const overallPackagingSummary = useMemo(
     () =>
       applyPackagingRecipientCountOverrides(baseOverallPackagingSummary, {
         amilCount: parsedPackagingAmilCount,
         nonAmilCount: parsedPackagingNonAmilCount,
+      }, {
+        totals: overallPackagingTotals,
+        amilDistributionMode,
+        amilShareFactor,
+        amilPercentage,
       }),
-    [baseOverallPackagingSummary, parsedPackagingAmilCount, parsedPackagingNonAmilCount],
+    [
+      baseOverallPackagingSummary,
+      parsedPackagingAmilCount,
+      parsedPackagingNonAmilCount,
+      overallPackagingTotals,
+      amilDistributionMode,
+      amilShareFactor,
+      amilPercentage,
+    ],
   );
 
   const saveDistributionConfigMutation = useMutation({
@@ -1142,14 +1315,14 @@ export default function Calculations() {
           </CardContent>
         </Card>
 
-        {overallPackagingSummary.recipients.length > 0 && (
+        {(overallPackagingSummary.recipients.length > 0 || overallPackagingTotals.totalCash > 0 || overallPackagingTotals.totalRiceKg > 0 || overallPackagingTotals.totalFoodKg > 0) && (
           <Card className="border-emerald-200/70 bg-gradient-to-br from-emerald-50/80 via-background to-sky-50/40">
             <CardHeader className="pb-3">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <CardTitle className="text-base">Ringkasan Pembungkusan Total Keseluruhan</CardTitle>
                   <CardDescription>
-                    Menghitung seluruh saldo distribusi aktif periode ini. Cocok dipakai saat pembagian dilakukan tanpa batch lock.
+                    Menghitung seluruh penerimaan periode aktif. Cocok dipakai saat pembagian dilakukan tanpa batch lock.
                   </CardDescription>
                 </div>
                 <Badge variant="outline" className="w-fit rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700">
@@ -1161,27 +1334,27 @@ export default function Calculations() {
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                 <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
                   <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Total Uang</p>
-                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingSummary.totals.totalCash)}</p>
+                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingTotals.totalCash)}</p>
                 </div>
                 <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
                   <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">ZF Uang</p>
-                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingSummary.totals.zakatFitrahCash)}</p>
+                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingTotals.zakatFitrahCash)}</p>
                 </div>
                 <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
                   <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Zakat Mal</p>
-                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingSummary.totals.zakatMalCash)}</p>
+                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingTotals.zakatMalCash)}</p>
                 </div>
                 <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
                   <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Fidyah Uang</p>
-                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingSummary.totals.fidyahCash)}</p>
+                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingTotals.fidyahCash)}</p>
                 </div>
                 <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
                   <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Beras Zakat</p>
-                  <p className="mt-1 text-base font-semibold">{overallPackagingSummary.totals.totalRiceKg.toFixed(2)} kg</p>
+                  <p className="mt-1 text-base font-semibold">{overallPackagingTotals.totalRiceKg.toFixed(2)} kg</p>
                 </div>
                 <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
                   <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Makanan Fidyah</p>
-                  <p className="mt-1 text-base font-semibold">{overallPackagingSummary.totals.totalFoodKg.toFixed(2)} kg</p>
+                  <p className="mt-1 text-base font-semibold">{overallPackagingTotals.totalFoodKg.toFixed(2)} kg</p>
                 </div>
               </div>
 
@@ -1206,6 +1379,27 @@ export default function Calculations() {
                   </div>
                 </div>
 
+                {amilDistributionMode === "proportional_with_factor" && (
+                  <div className="mt-4 rounded-2xl border border-cyan-200/70 bg-cyan-50/70 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-800">
+                      Formula Rasio x Faktor
+                    </p>
+                    <p className="mt-1 text-xs leading-6 text-cyan-900/85">
+                      Total <span className="font-medium">zakat fitrah + zakat mal</span> dibagi dulu ke total paket
+                      <span className="font-medium"> amil + non-amil</span> untuk dapat nilai dasar per penerima. Nilai
+                      dasar per amil itu lalu dikalikan faktor{" "}
+                      <span className="font-medium">{amilShareFactor.toFixed(2)}</span>. Jadi bila faktor 0,50 maka amil
+                      menerima <span className="font-medium">setengah dari nilai dasar per penerima</span>.
+                    </p>
+                    <p className="mt-2 text-xs leading-6 text-cyan-900/85">
+                      Selisih potongan jatah amil otomatis kembali ke kelompok non-amil. Setelah itu seluruh{" "}
+                      <span className="font-medium">fidyah uang</span> dan{" "}
+                      <span className="font-medium">fidyah makanan</span> ditambahkan penuh ke non-amil dan dibagi ke
+                      jumlah non-amil yang kamu set.
+                    </p>
+                  </div>
+                )}
+
                 <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,220px)_1fr]">
                   <div className="rounded-2xl border border-emerald-200/70 bg-emerald-50/60 p-3">
                     <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-700">Jumlah Amil</p>
@@ -1219,7 +1413,7 @@ export default function Calculations() {
                       className="mt-2 h-11 rounded-xl border-emerald-200/80 bg-white"
                     />
                     <p className="mt-2 text-[11px] text-emerald-700/80">
-                      Dipakai untuk hitung rata-rata uang, beras, dan fidyah makanan per amil.
+                      Dipakai untuk hitung rata-rata porsi amil dari zakat fitrah dan zakat mal. Fidyah tidak masuk ke amil.
                     </p>
                   </div>
                   <div className="rounded-2xl border border-sky-200/70 bg-sky-50/60 p-3">
@@ -1234,14 +1428,16 @@ export default function Calculations() {
                       className="mt-2 h-11 rounded-xl border-sky-200/80 bg-white"
                     />
                     <p className="mt-2 text-[11px] text-sky-700/80">
-                      Dipakai untuk hitung rata-rata paket mustahik non-amil dari total keseluruhan.
+                      Dipakai untuk hitung rata-rata paket non-amil dari zakat fitrah, zakat mal, dan seluruh fidyah.
                     </p>
                   </div>
                   <div className="rounded-2xl border border-border/70 bg-muted/20 p-3">
                     <p className="text-xs font-medium text-foreground">Perilaku hitungan</p>
                     <p className="mt-1 text-xs leading-6 text-muted-foreground">
-                      Total uang, beras, dan fidyah tetap mengikuti saldo distribusi periode aktif. Yang diubah hanya
-                      jumlah orang untuk kebutuhan pembungkusan cepat, sehingga nilai per orang langsung menyesuaikan.
+                      Sumber dana diambil dari total penerimaan periode aktif. Dalam mode rasio x faktor, sistem
+                      membagi dulu nilai dasar per penerima dari zakat fitrah dan zakat mal, lalu mengurangi jatah amil
+                      sesuai faktor dan melempar sisa selisihnya ke non-amil. Seluruh fidyah tetap masuk penuh ke
+                      non-amil. Yang diubah hanya jumlah orang untuk kebutuhan pembungkusan cepat.
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button
@@ -1275,7 +1471,9 @@ export default function Calculations() {
                   <div className="mb-3 flex items-center justify-between">
                     <div>
                       <p className="text-sm font-semibold text-emerald-950">Amil</p>
-                      <p className="text-xs text-emerald-800/80">Estimasi paket per orang amil dari total keseluruhan.</p>
+                      <p className="text-xs text-emerald-800/80">
+                        Sumber: porsi amil dari zakat fitrah dan zakat mal. Fidyah tidak dihitung untuk amil.
+                      </p>
                     </div>
                     <Badge className="rounded-full bg-emerald-600">{overallPackagingSummary.groupBreakdown.amil.recipientCount} orang</Badge>
                   </div>
@@ -1291,18 +1489,16 @@ export default function Calculations() {
                       <p className="text-[11px] text-muted-foreground">Total: {overallPackagingSummary.groupBreakdown.amil.totalRiceKg.toFixed(2)} kg</p>
                     </div>
                     <div className="rounded-2xl border border-emerald-200/70 bg-white/80 p-3">
-                      <p className="text-xs text-muted-foreground">Fidyah makanan per orang</p>
-                      <p className="mt-1 text-lg font-semibold">{overallPackagingSummary.groupBreakdown.amil.averageFoodPerRecipient.toFixed(2)} kg</p>
-                      <p className="text-[11px] text-muted-foreground">Total: {overallPackagingSummary.groupBreakdown.amil.totalFoodKg.toFixed(2)} kg</p>
+                      <p className="text-xs text-muted-foreground">Fidyah untuk amil</p>
+                      <p className="mt-1 text-lg font-semibold">Tidak dihitung</p>
+                      <p className="text-[11px] text-muted-foreground">Amil tidak menerima fidyah.</p>
                     </div>
                     <div className="rounded-2xl border border-emerald-200/70 bg-white/80 p-3">
-                      <p className="text-xs text-muted-foreground">Detail uang</p>
+                      <p className="text-xs text-muted-foreground">Detail uang amil</p>
                       <p className="mt-1 text-sm font-semibold leading-6">
                         ZF {formatCurrency(overallPackagingSummary.groupBreakdown.amil.zakatFitrahCash)}
                         <br />
                         ZM {formatCurrency(overallPackagingSummary.groupBreakdown.amil.zakatMalCash)}
-                        <br />
-                        FD {formatCurrency(overallPackagingSummary.groupBreakdown.amil.fidyahCash)}
                       </p>
                     </div>
                   </div>
@@ -1312,7 +1508,9 @@ export default function Calculations() {
                   <div className="mb-3 flex items-center justify-between">
                     <div>
                       <p className="text-sm font-semibold text-sky-950">Non-Amil</p>
-                      <p className="text-xs text-sky-800/80">Estimasi paket per orang mustahik non-amil dari total keseluruhan.</p>
+                      <p className="text-xs text-sky-800/80">
+                        Sumber: sisa zakat fitrah, sisa zakat mal, dan seluruh fidyah untuk mustahik non-amil.
+                      </p>
                     </div>
                     <Badge variant="outline" className="rounded-full border-sky-300 bg-white/90 px-3 py-1 text-sky-700">
                       {overallPackagingSummary.groupBreakdown.nonAmil.recipientCount} orang
@@ -1335,7 +1533,7 @@ export default function Calculations() {
                       <p className="text-[11px] text-muted-foreground">Total: {overallPackagingSummary.groupBreakdown.nonAmil.totalFoodKg.toFixed(2)} kg</p>
                     </div>
                     <div className="rounded-2xl border border-sky-200/70 bg-white/80 p-3">
-                      <p className="text-xs text-muted-foreground">Detail uang</p>
+                      <p className="text-xs text-muted-foreground">Detail uang non-amil</p>
                       <p className="mt-1 text-sm font-semibold leading-6">
                         ZF {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.zakatFitrahCash)}
                         <br />
@@ -1350,7 +1548,7 @@ export default function Calculations() {
 
               <div className="flex flex-col gap-2 rounded-2xl border border-border/70 bg-background/85 p-3 md:flex-row md:items-center md:justify-between">
                 <p className="text-xs text-muted-foreground">
-                  Ringkasan ini mengambil seluruh saldo distribusi yang masih tersedia pada periode aktif. Cocok untuk pembungkusan cepat saat tidak memakai batch.
+                  Ringkasan ini mengambil seluruh penerimaan periode aktif, termasuk zakat mal, lalu menghitung estimasi pembungkusan cepat tanpa bergantung pada batch.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -1475,32 +1673,32 @@ export default function Calculations() {
               <DialogTitle>Detail Pembungkusan Total Keseluruhan</DialogTitle>
             </DialogHeader>
 
-            {overallPackagingSummary.recipients.length > 0 ? (
+            {overallPackagingSummary.recipients.length > 0 || overallPackagingTotals.totalCash > 0 || overallPackagingTotals.totalRiceKg > 0 || overallPackagingTotals.totalFoodKg > 0 ? (
               <div className="space-y-4">
                 <div className="grid gap-2 md:grid-cols-6">
                   <div className="rounded-md border bg-muted/20 p-2">
                     <p className="text-[11px] text-muted-foreground">Total Uang</p>
-                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingSummary.totals.totalCash)}</p>
+                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingTotals.totalCash)}</p>
                   </div>
                   <div className="rounded-md border bg-muted/20 p-2">
                     <p className="text-[11px] text-muted-foreground">Uang Zakat Fitrah</p>
-                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingSummary.totals.zakatFitrahCash)}</p>
+                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingTotals.zakatFitrahCash)}</p>
                   </div>
                   <div className="rounded-md border bg-muted/20 p-2">
                     <p className="text-[11px] text-muted-foreground">Uang Zakat Mal</p>
-                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingSummary.totals.zakatMalCash)}</p>
+                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingTotals.zakatMalCash)}</p>
                   </div>
                   <div className="rounded-md border bg-muted/20 p-2">
                     <p className="text-[11px] text-muted-foreground">Uang Fidyah</p>
-                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingSummary.totals.fidyahCash)}</p>
+                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingTotals.fidyahCash)}</p>
                   </div>
                   <div className="rounded-md border bg-muted/20 p-2">
                     <p className="text-[11px] text-muted-foreground">Beras Zakat</p>
-                    <p className="text-sm font-semibold">{overallPackagingSummary.totals.totalRiceKg.toFixed(2)} kg</p>
+                    <p className="text-sm font-semibold">{overallPackagingTotals.totalRiceKg.toFixed(2)} kg</p>
                   </div>
                   <div className="rounded-md border bg-muted/20 p-2">
                     <p className="text-[11px] text-muted-foreground">Makanan Fidyah</p>
-                    <p className="text-sm font-semibold">{overallPackagingSummary.totals.totalFoodKg.toFixed(2)} kg</p>
+                    <p className="text-sm font-semibold">{overallPackagingTotals.totalFoodKg.toFixed(2)} kg</p>
                   </div>
                 </div>
 
@@ -1526,11 +1724,13 @@ export default function Calculations() {
                         </p>
                       </div>
                       <div className="rounded-md border bg-background/80 p-2 sm:col-span-2">
-                        <p className="text-muted-foreground">Detail Uang</p>
+                        <p className="text-muted-foreground">Sumber untuk Amil</p>
                         <p className="font-medium">
                           ZF {formatCurrency(overallPackagingSummary.groupBreakdown.amil.zakatFitrahCash)} | ZM{" "}
-                          {formatCurrency(overallPackagingSummary.groupBreakdown.amil.zakatMalCash)} | FD{" "}
-                          {formatCurrency(overallPackagingSummary.groupBreakdown.amil.fidyahCash)}
+                          {formatCurrency(overallPackagingSummary.groupBreakdown.amil.zakatMalCash)}
+                        </p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Fidyah tidak masuk ke kelompok amil.
                         </p>
                       </div>
                     </div>
@@ -1557,11 +1757,14 @@ export default function Calculations() {
                         </p>
                       </div>
                       <div className="rounded-md border bg-background/80 p-2 sm:col-span-2">
-                        <p className="text-muted-foreground">Detail Uang</p>
+                        <p className="text-muted-foreground">Sumber untuk Non-Amil</p>
                         <p className="font-medium">
                           ZF {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.zakatFitrahCash)} | ZM{" "}
                           {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.zakatMalCash)} | FD{" "}
                           {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.fidyahCash)}
+                        </p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Non-amil menerima sisa zakat fitrah, sisa zakat mal, dan seluruh fidyah.
                         </p>
                       </div>
                     </div>

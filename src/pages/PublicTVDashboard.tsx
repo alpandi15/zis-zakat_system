@@ -30,6 +30,7 @@ import {
 
 import { supabase } from "@/integrations/supabase/client";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
+import { usePeriodSummary } from "@/hooks/useDashboardData";
 import { useDashboardRealtime } from "@/hooks/useDashboardRealtime";
 import { getClientDeviceInfo } from "@/lib/deviceInfo";
 
@@ -66,6 +67,7 @@ const formatDateTime = (value: string | null): string => {
 
 export default function PublicTVDashboard() {
   const { data, isLoading, dataUpdatedAt, refetch } = useDashboardSummary();
+  const { data: periodSummary } = usePeriodSummary(data?.period.id || null);
   const deviceInfo = useMemo(() => getClientDeviceInfo(), []);
 
   // 🔥 realtime auto refresh
@@ -159,16 +161,16 @@ export default function PublicTVDashboard() {
   
       // 🔥 sesuai update kamu
       totalMuzakkiHouseholds:
-        data.summary.totalTransactionsFitrah || 0,
+        (periodSummary?.total_muzakki_households ?? data.summary.totalMuzakkiHouseholds ?? data.summary.totalTransactionsFitrah) || 0,
   
       totalJiwaFitrah:
-        data.summary.totalJiwaFitrah || 0,
+        (periodSummary?.total_jiwa_fitrah ?? data.summary.totalJiwaFitrah) || 0,
   
       totalTransactions:
         data.summary.totalTransactions || 0,
   
       totalDistributions:
-        data.summary.totalDistributions || 0,
+        (periodSummary?.total_distributions ?? data.summary.totalDistributions) || 0,
   
       receiptWindow: {
         firstReceiptAt: data.receiptWindow.firstReceiptAt,
@@ -182,7 +184,7 @@ export default function PublicTVDashboard() {
         },
       },
     };
-  }, [data]);
+  }, [data, periodSummary]);
 
   const cashComposition = useMemo(() => {
     if (!mappedData) return [];
@@ -333,7 +335,7 @@ export default function PublicTVDashboard() {
                 <div>
                   <p className="text-xs text-sky-200 md:text-sm">Muzakki Kepala Keluarga</p>
                   <p className="mt-1 text-xl font-semibold text-white md:text-3xl">
-                    {data.summary.totalTransactionsFitrah.toLocaleString("id-ID")}
+                    {mappedData.totalMuzakkiHouseholds.toLocaleString("id-ID")}
                   </p>
                 </div>
                 <div className="rounded-xl bg-sky-400/20 p-2.5 md:p-3">
@@ -487,12 +489,12 @@ export default function PublicTVDashboard() {
 
           <Card className="animate-in fade-in slide-in-from-bottom-2 duration-700 border-white/10 bg-slate-900/70 text-slate-100 backdrop-blur">
             <CardHeader className="pb-2">
-              <CardTitle className="text-base text-slate-100 md:text-xl">Saldo Dana Saat Ini</CardTitle>
+              <CardTitle className="text-base text-slate-100 md:text-xl">Total Beras Saat Ini</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 p-3">
-                <p className="text-xs text-emerald-200">Total Saldo Kas</p>
-                <p className="text-xl font-semibold text-emerald-100">{formatCurrency(totalCurrentCashBalance)}</p>
+                <p className="text-xs text-emerald-200">Total Beras</p>
+                <p className="text-xl font-semibold text-emerald-100">{formatWeight(data.received.zakatFitrahRice)}</p>
               </div>
 
               <div className="h-[190px]">

@@ -87,113 +87,12 @@ export function usePeriodSummary(periodId: string | null) {
     queryKey: ["period-summary", periodId],
     queryFn: async () => {
       if (!periodId) return null;
-
-      // Get period info
-      const { data: period, error: periodError } = await supabase
-        .from("periods")
-        .select("*")
-        .eq("id", periodId)
-        .maybeSingle();
-
-      if (periodError) throw periodError;
-      if (!period) return null;
-
-      // Get fund balances
-      const { data: balances, error: balanceError } = await supabase.rpc(
-        "get_all_fund_balances",
-        { _period_id: periodId }
-      );
-
-      if (balanceError) throw balanceError;
-
-      const [fitrahSummaryRes, zakatMalSummaryRes, fidyahSummaryRes] = await Promise.all([
-        supabase
-          .from("zakat_fitrah_transactions")
-          .select("muzakki_id, total_members")
-          .eq("period_id", periodId)
-          .eq("is_void", false),
-        supabase
-          .from("zakat_mal_transactions")
-          .select("muzakki_id")
-          .eq("period_id", periodId)
-          .eq("is_void", false),
-        supabase
-          .from("fidyah_transactions")
-          .select("payer_muzakki_id")
-          .eq("period_id", periodId)
-          .eq("is_void", false),
-      ]);
-
-      if (fitrahSummaryRes.error) throw fitrahSummaryRes.error;
-      if (zakatMalSummaryRes.error) throw zakatMalSummaryRes.error;
-      if (fidyahSummaryRes.error) throw fidyahSummaryRes.error;
-
-      const fitrahSummaryRows = (fitrahSummaryRes.data || []) as FitrahSummaryRow[];
-      const zakatMalSummaryRows = (zakatMalSummaryRes.data || []) as ZakatMalSummaryRow[];
-      const fidyahSummaryRows = (fidyahSummaryRes.data || []) as FidyahSummaryRow[];
-
-      const householdMuzakkiIds = new Set<string>();
-      fitrahSummaryRows.forEach((row) => {
-        if (row.muzakki_id) householdMuzakkiIds.add(row.muzakki_id);
-      });
-      zakatMalSummaryRows.forEach((row) => {
-        if (row.muzakki_id) householdMuzakkiIds.add(row.muzakki_id);
-      });
-      fidyahSummaryRows.forEach((row) => {
-        if (row.payer_muzakki_id) householdMuzakkiIds.add(row.payer_muzakki_id);
+      const { data, error } = await supabase.rpc("dashboard_period_summary", {
+        _period_id: periodId,
       });
 
-      const totalJiwaFitrah = fitrahSummaryRows.reduce(
-        (sum, row) => sum + Math.max(1, Number(row.total_members) || 0),
-        0,
-      );
-      const totalCombinedCash =
-        (balances?.find((b: FundBalance) => b.category === "zakat_fitrah_cash")?.total_cash || 0) +
-        (balances?.find((b: FundBalance) => b.category === "zakat_mal")?.total_cash || 0) +
-        (balances?.find((b: FundBalance) => b.category === "fidyah_cash")?.total_cash || 0);
-
-      // Get mustahik count with distributions
-      const { count: mustahikCount } = await supabase
-        .from("zakat_distributions")
-        .select("mustahik_id", { count: "exact", head: true })
-        .eq("period_id", periodId);
-
-      // Get total distributions
-      const { count: distributionCount } = await supabase
-        .from("zakat_distributions")
-        .select("id", { count: "exact", head: true })
-        .eq("period_id", periodId)
-        .eq("status", "distributed");
-
-      const summary: PeriodSummary = {
-        period_id: period.id,
-        period_name: period.name,
-        hijri_year: period.hijri_year,
-        gregorian_year: period.gregorian_year,
-        zakat_fitrah_cash:
-          balances?.find((b: FundBalance) => b.category === "zakat_fitrah_cash")
-            ?.total_cash || 0,
-        zakat_fitrah_rice_kg:
-          balances?.find((b: FundBalance) => b.category === "zakat_fitrah_rice")
-            ?.total_rice_kg || 0,
-        zakat_mal:
-          balances?.find((b: FundBalance) => b.category === "zakat_mal")
-            ?.total_cash || 0,
-        fidyah_cash:
-          balances?.find((b: FundBalance) => b.category === "fidyah_cash")
-            ?.total_cash || 0,
-        fidyah_food_kg:
-          balances?.find((b: FundBalance) => b.category === "fidyah_food")
-            ?.total_food_kg || 0,
-        total_muzakki: householdMuzakkiIds.size,
-        total_muzakki_households: householdMuzakkiIds.size,
-        total_jiwa_fitrah: totalJiwaFitrah,
-        total_mustahik: mustahikCount || 0,
-        total_distributions: distributionCount || 0,
-        total_combined_cash: totalCombinedCash,
-      };
-
-      return summary;
+      if (error) throw error;
+      return (data || null) as unknown as PeriodSummary | null;
     },
     enabled: !!periodId,
   });
