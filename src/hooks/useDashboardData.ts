@@ -157,19 +157,22 @@ export function useZakatVsFidyahComparison(periodId: string | null) {
       const { data: zakatFitrah } = await supabase
         .from("zakat_fitrah_transactions")
         .select("money_amount, rice_amount_kg")
-        .eq("period_id", periodId);
+        .eq("period_id", periodId)
+        .eq("is_void", false);
 
       // Get zakat mal transactions
       const { data: zakatMal } = await supabase
         .from("zakat_mal_transactions")
         .select("final_zakat_amount")
-        .eq("period_id", periodId);
+        .eq("period_id", periodId)
+        .eq("is_void", false);
 
       // Get fidyah transactions
       const { data: fidyah } = await supabase
         .from("fidyah_transactions")
         .select("cash_amount, food_amount_kg")
-        .eq("period_id", periodId);
+        .eq("period_id", periodId)
+        .eq("is_void", false);
 
       const zakatFitrahTotal = (zakatFitrah || []).reduce(
         (sum, t) => sum + (Number(t.money_amount) || 0),

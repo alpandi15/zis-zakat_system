@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Edit, Plus, UserCheck, UserX, History, Trash2 } from "lucide-react";
+import { ArrowLeft, Edit, Plus, UserCheck, UserRound, UserX, History, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 
@@ -442,45 +443,59 @@ export default function MuzakkiDetail() {
     <AppLayout title={`Detail: ${muzakki.name}`}>
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
-      <div className="space-y-6">
-        {/* Back button */}
-        <Button variant="ghost" onClick={() => router.push("/muzakki")} className="gap-2">
-          <ArrowLeft className="h-4 w-4" />
-          Kembali ke Daftar Muzakki
-        </Button>
+      <div className="space-y-4">
+        <PageHeader
+          title={muzakki.name}
+          description="Detail muzakki beserta anggota keluarga yang menjadi dasar perhitungan zakat fitrah."
+          icon={UserRound}
+          badges={
+            <Badge
+              variant="outline"
+              className={`rounded-full ${
+                muzakki.is_active
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                  : "border-border bg-muted text-muted-foreground"
+              }`}
+            >
+              {muzakki.is_active ? "Aktif" : "Nonaktif"}
+            </Badge>
+          }
+          actions={
+            <>
+              <Button variant="outline" className="h-10 gap-2 rounded-xl" onClick={() => router.push("/muzakki")}>
+                <ArrowLeft className="h-4 w-4" />
+                Kembali
+              </Button>
+              {!isReadOnly && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 rounded-xl"
+                    onClick={handleToggleMuzakkiStatus}
+                    title={muzakki.is_active ? "Nonaktifkan Muzakki" : "Aktifkan Muzakki"}
+                  >
+                    {muzakki.is_active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 rounded-xl text-destructive"
+                    onClick={handleDeleteMuzakki}
+                    title="Hapus Muzakki"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
+            </>
+          }
+        />
 
         {/* Muzakki Info Card */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Informasi Muzakki</span>
-              <div className="flex items-center gap-2">
-                <Badge variant={muzakki.is_active ? "default" : "secondary"}>
-                  {muzakki.is_active ? "Aktif" : "Nonaktif"}
-                </Badge>
-                {!isReadOnly && (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={handleToggleMuzakkiStatus}
-                      title={muzakki.is_active ? "Nonaktifkan Muzakki" : "Aktifkan Muzakki"}
-                    >
-                      {muzakki.is_active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={handleDeleteMuzakki}
-                      title="Hapus Muzakki"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </>
-                )}
-              </div>
-            </CardTitle>
+        <Card className="border-border/70">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Informasi muzakki</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 md:grid-cols-2">

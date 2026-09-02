@@ -40,10 +40,15 @@ export function PeriodProvider({ children }: { children: ReactNode }) {
   const { data: periods = [], isLoading } = useQuery({
     queryKey: ["periods"],
     queryFn: async () => {
+      // Urutan deterministik supaya "periode aktif" konsisten dengan papan publik /tv
+      // meski ada beberapa periode pada tahun hijriah yang sama.
       const { data, error } = await supabase
         .from("periods")
         .select("*")
-        .order("hijri_year", { ascending: false });
+        .order("hijri_year", { ascending: false })
+        .order("gregorian_year", { ascending: false })
+        .order("start_date", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
       return data as Period[];

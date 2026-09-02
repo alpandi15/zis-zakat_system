@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { useAsnafSettings, AsnafSetting } from "@/hooks/useAsnafSettings";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -127,42 +128,38 @@ export default function AsnafSettings() {
 
   return (
     <AppLayout title="Pengaturan Asnaf">
-      <div className="space-y-6">
-        {/* Summary Card */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Konfigurasi Asnaf & Kelayakan
-            </CardTitle>
-            <CardDescription>
-              Kelola kategori asnaf penerima zakat dan pengaturan kelayakan penerimaan masing-masing dana.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4 mb-4">
-              <div className="flex items-center gap-2">
-                <Badge variant="default">
-                  Amil: {amilPercentage.toFixed(2)}%
-                </Badge>
-                <span className="text-sm text-muted-foreground">Persentase untuk Amil</span>
-              </div>
-              <div className="text-sm text-muted-foreground">
-                Sisa {(100 - amilPercentage).toFixed(2)}% dibagi rata ke mustahik lainnya
-              </div>
-            </div>
-            {isAdmin && (
-              <Button onClick={() => { resetForm(); setIsAddDialogOpen(true); }}>
-                <Plus className="h-4 w-4 mr-2" />
-                Tambah Asnaf Baru
+      <div className="space-y-4">
+        <PageHeader
+          title="Konfigurasi Asnaf & Kelayakan"
+          description="Kelola golongan penerima zakat beserta kelayakan menerima tiap jenis dana."
+          icon={Users}
+          badges={
+            <>
+              <Badge className="rounded-full tabular-nums">Amil {amilPercentage.toFixed(2)}%</Badge>
+              <Badge variant="outline" className="rounded-full tabular-nums">
+                Sisa {(100 - amilPercentage).toFixed(2)}% untuk mustahik lain
+              </Badge>
+            </>
+          }
+          actions={
+            isAdmin ? (
+              <Button
+                className="h-10 rounded-xl"
+                onClick={() => {
+                  resetForm();
+                  setIsAddDialogOpen(true);
+                }}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Tambah Asnaf
               </Button>
-            )}
-          </CardContent>
-        </Card>
+            ) : null
+          }
+        />
 
         {/* Asnaf Table */}
-        <Card>
-          <CardContent className="p-0">
+        <Card className="border-border/70">
+          <CardContent className="overflow-x-auto p-0">
             <Table>
               <TableHeader>
                 <TableRow>

@@ -20,6 +20,7 @@ interface PeriodSelectorProps {
   selectedPeriod: string | null;
   onPeriodChange: (periodId: string) => void;
   isLoading?: boolean;
+  className?: string;
 }
 
 export function PeriodSelector({
@@ -27,39 +28,32 @@ export function PeriodSelector({
   selectedPeriod,
   onPeriodChange,
   isLoading,
+  className,
 }: PeriodSelectorProps) {
   return (
-    <div className="flex w-full flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <Calendar className="h-4 w-4" />
-        <span className="text-xs font-medium sm:text-sm">Periode</span>
-      </div>
-      <Select
-        value={selectedPeriod || undefined}
-        onValueChange={onPeriodChange}
-        disabled={isLoading}
+    <Select value={selectedPeriod || undefined} onValueChange={onPeriodChange} disabled={isLoading}>
+      <SelectTrigger
+        className={
+          className ||
+          "h-10 w-full min-w-0 rounded-xl bg-background/70 backdrop-blur sm:w-[260px]"
+        }
+        aria-label="Pilih periode"
       >
-        <SelectTrigger className="w-full sm:w-[320px]">
-          <SelectValue placeholder="Pilih periode" />
-        </SelectTrigger>
-        <SelectContent>
-          {periods.map((period) => (
-            <SelectItem key={period.id} value={period.id}>
-              <div className="flex items-center gap-2">
-                <span>{period.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  ({period.hijri_year}H / {period.gregorian_year}M)
-                </span>
-                {period.status === "active" && (
-                  <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs text-primary">
-                    Aktif
-                  </span>
-                )}
-              </div>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+        <Calendar className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
+        <SelectValue placeholder="Pilih periode" />
+      </SelectTrigger>
+      <SelectContent>
+        {periods.map((period) => (
+          <SelectItem key={period.id} value={period.id}>
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate">{period.name}</span>
+              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                {period.hijri_year}H
+              </span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

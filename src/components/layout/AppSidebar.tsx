@@ -89,7 +89,7 @@ const adminNavItems = [
 
 export function AppSidebar() {
   const router = useRouter();
-  const { state, isMobile, setOpenMobile } = useSidebar();
+  const { state, isMobile, setOpenMobile, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed";
   const { profile, signOut, hasRole } = useAuth();
   const { periods, selectedPeriod, setSelectedPeriodId, isReadOnly } = usePeriod();
@@ -151,9 +151,7 @@ export function AppSidebar() {
           <div
             className={cn(
               "flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all",
-              isGroupActive(item)
-                ? "bg-primary/12 text-primary"
-                : "text-sidebar-foreground/90 hover:bg-sidebar-accent/80",
+              isGroupActive(item) ? "text-primary" : "text-sidebar-foreground/90",
             )}
           >
             <item.icon className="h-4 w-4 shrink-0" />
@@ -168,10 +166,10 @@ export function AppSidebar() {
                 onClick={handleNavigate}
                 data-nav-active={isActive(child.url) ? "true" : undefined}
                 className={cn(
-                  "block rounded-xl px-2.5 py-1.5 text-sm transition-all duration-200",
+                  "block rounded-lg px-2.5 py-1.5 text-sm transition-all duration-200",
                   isActive(child.url)
-                    ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20"
-                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
+                    ? "bg-primary/12 font-medium text-primary"
+                    : "text-sidebar-foreground/75 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
                 )}
               >
                 {child.title}
@@ -182,22 +180,33 @@ export function AppSidebar() {
       );
     }
 
+    const active = isGroupActive(item);
+
     return (
       <SidebarMenuItem>
-        <SidebarMenuButton asChild>
+        <SidebarMenuButton asChild tooltip={item.title}>
           <Link
             href={item.url}
             scroll={false}
             onClick={handleNavigate}
-            data-nav-active={isGroupActive(item) ? "true" : undefined}
+            data-nav-active={active ? "true" : undefined}
             className={cn(
-              "flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all duration-200",
+              "group/nav relative flex items-center gap-3 overflow-hidden rounded-xl px-3 py-2 text-sm transition-all duration-200",
               "group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2",
-              "hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
-              isGroupActive(item) && "bg-primary text-primary-foreground shadow-sm shadow-primary/20",
+              active
+                ? "bg-gradient-to-r from-primary to-primary/85 text-primary-foreground shadow-md shadow-primary/25"
+                : "text-sidebar-foreground/90 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
             )}
           >
-            <item.icon className="h-4 w-4 shrink-0" />
+            {active && (
+              <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-primary-foreground/70 group-data-[collapsible=icon]:hidden" />
+            )}
+            <item.icon
+              className={cn(
+                "h-4 w-4 shrink-0 transition-transform duration-200",
+                !active && "group-hover/nav:scale-110",
+              )}
+            />
             {!collapsed && <span className="font-medium">{item.title}</span>}
           </Link>
         </SidebarMenuButton>
@@ -208,24 +217,22 @@ export function AppSidebar() {
   return (
     <Sidebar
       collapsible="icon"
-      className="border-r border-sidebar-border/70 bg-[linear-gradient(180deg,hsl(var(--sidebar))/0.98_0%,hsl(var(--sidebar-accent))/0.18_100%)] backdrop-blur-xl"
+      className="border-r border-sidebar-border/60 bg-background/80 backdrop-blur-xl"
     >
-      <SidebarHeader className="border-b border-sidebar-border/70 px-4 pb-4 pt-5">
-        <div className="flex items-center gap-3">
-          <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-2xl border border-border/60 bg-background shadow-md shadow-primary/15">
-            <Image
-              src="/logo.png"
-              alt="AmanahZIS Logo"
-              fill
-              sizes="40px"
-              className="object-cover"
-              priority
-            />
+      <SidebarHeader className="relative border-b border-sidebar-border/60 px-4 pb-4 pt-5">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-primary/[0.09] to-transparent" />
+        <div className="relative flex items-center gap-3">
+          <div className="relative h-10 w-10 shrink-0 rounded-2xl bg-gradient-to-br from-primary/30 to-sky-400/20 p-[1.5px] shadow-md shadow-primary/20">
+            <div className="relative h-full w-full overflow-hidden rounded-[13px] bg-background">
+              <Image src="/logo.png" alt="AmanahZIS Logo" fill sizes="40px" className="object-cover" priority />
+            </div>
           </div>
           {!collapsed && (
             <div className="flex min-w-0 flex-col">
-              <span className="truncate font-semibold text-foreground">AmanahZIS</span>
-              <span className="truncate text-xs text-muted-foreground">Platform Operasional ZIS Masjid</span>
+              <span className="truncate bg-gradient-to-r from-foreground to-primary bg-clip-text font-semibold tracking-tight text-transparent">
+                AmanahZIS
+              </span>
+              <span className="truncate text-[11px] text-muted-foreground">Platform Operasional ZIS Masjid</span>
             </div>
           )}
         </div>
@@ -233,36 +240,46 @@ export function AppSidebar() {
 
       <SidebarContent ref={sidebarContentRef} className="px-2.5 py-4">
         {/* Period Selector */}
-        {!collapsed && (
-          <div className="mb-4 rounded-2xl border border-sidebar-border/70 bg-background/55 p-2.5 shadow-sm">
-            <div className="flex items-center gap-2 mb-2">
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-              <span className="text-xs font-medium text-muted-foreground">Periode Aktif</span>
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            title={selectedPeriod?.name || "Pilih periode"}
+            className="mx-auto mb-3 flex h-9 w-9 items-center justify-center rounded-xl border border-sidebar-border/70 bg-background/60 text-muted-foreground transition-colors hover:text-primary"
+          >
+            <Calendar className="h-4 w-4" />
+          </button>
+        ) : (
+          <div className="mb-4 rounded-2xl border border-sidebar-border/70 bg-gradient-to-br from-primary/[0.07] to-transparent p-2.5 shadow-sm">
+            <div className="mb-2 flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-primary" />
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Periode Aktif
+              </span>
               {isReadOnly && <Lock className="h-3 w-3 text-warning" />}
             </div>
-            <Select
-              value={selectedPeriod?.id || ""}
-              onValueChange={setSelectedPeriodId}
-            >
-              <SelectTrigger className="w-full text-sm">
+            <Select value={selectedPeriod?.id || ""} onValueChange={setSelectedPeriodId}>
+              <SelectTrigger
+                className="h-10 w-full min-w-0 rounded-xl bg-background/80 text-sm"
+                title={selectedPeriod?.name || undefined}
+              >
                 <SelectValue placeholder="Pilih periode" />
               </SelectTrigger>
               <SelectContent>
                 {periods.map((period) => (
                   <SelectItem key={period.id} value={period.id}>
-                    <div className="flex items-center gap-2">
-                      <span>{period.name}</span>
-                      {period.status === "archived" && (
-                        <Lock className="h-3 w-3 text-muted-foreground" />
-                      )}
-                    </div>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate">{period.name}</span>
+                      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                        {period.hijri_year}H
+                      </span>
+                      {period.status === "archived" && <Lock className="h-3 w-3 shrink-0 text-muted-foreground" />}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {isReadOnly && (
-              <p className="mt-1 text-xs text-warning">Mode baca saja</p>
-            )}
+            {isReadOnly && <p className="mt-1.5 text-[11px] font-medium text-warning">Mode baca saja</p>}
           </div>
         )}
 
@@ -340,9 +357,9 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border/70 bg-background/55 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
-        <div className="flex items-center gap-3 rounded-2xl border border-sidebar-border/70 bg-sidebar-accent/45 p-2.5">
-          <Avatar className="h-9 w-9">
-            <AvatarFallback className="bg-primary/10 text-primary text-sm">
+        <div className="flex items-center gap-3 rounded-2xl border border-sidebar-border/70 bg-gradient-to-br from-primary/[0.07] to-transparent p-2.5">
+          <Avatar className="h-9 w-9 ring-2 ring-primary/15">
+            <AvatarFallback className="bg-primary/10 text-sm font-semibold text-primary">
               {profile?.full_name?.charAt(0)?.toUpperCase() || "U"}
             </AvatarFallback>
           </Avatar>

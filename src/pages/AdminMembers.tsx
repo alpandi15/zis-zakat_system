@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { DataTable, Column } from "@/components/shared/DataTable";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -417,9 +418,28 @@ export default function AdminMembers() {
     );
   }
 
+  const adminCount = users.filter((user) => user.role === "super_admin").length;
+
   return (
     <AppLayout title="Manajemen Pengguna">
-      <DataTable
+      <div className="space-y-4">
+        <PageHeader
+          title="Manajemen Pengguna"
+          description="Kelola akun panitia dan hak akses masing-masing peran."
+          icon={UserCog}
+          badges={
+            <>
+              <Badge variant="outline" className="rounded-full tabular-nums">
+                {users.length} pengguna
+              </Badge>
+              <Badge variant="outline" className="rounded-full tabular-nums">
+                {adminCount} super admin
+              </Badge>
+            </>
+          }
+        />
+
+        <DataTable
         title="Daftar Pengguna"
         data={users}
         columns={columns}
@@ -442,7 +462,8 @@ export default function AdminMembers() {
             )}
           </div>
         )}
-      />
+        />
+      </div>
 
       {/* Edit Role Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
@@ -470,12 +491,12 @@ export default function AdminMembers() {
                 <SelectContent>
                   {ASSIGNABLE_ROLES.map((role) => (
                     <SelectItem key={role} value={role}>
-                      <div className="flex items-center gap-2">
-                        <span>{ROLE_LABELS[role]}</span>
-                        <span className="text-xs text-muted-foreground">
-                          ({ADMIN_ROLES.includes(role) ? "Admin" : "Petugas"})
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate">{ROLE_LABELS[role]}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {ADMIN_ROLES.includes(role) ? "Admin" : "Petugas"}
                         </span>
-                      </div>
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -557,12 +578,12 @@ export default function AdminMembers() {
                 <SelectContent>
                   {ASSIGNABLE_ROLES.map((role) => (
                     <SelectItem key={role} value={role}>
-                      <div className="flex items-center gap-2">
-                        <span>{ROLE_LABELS[role]}</span>
-                        <span className="text-xs text-muted-foreground">
-                          ({ADMIN_ROLES.includes(role) ? "Admin" : "Petugas"})
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate">{ROLE_LABELS[role]}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {ADMIN_ROLES.includes(role) ? "Admin" : "Petugas"}
                         </span>
-                      </div>
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>

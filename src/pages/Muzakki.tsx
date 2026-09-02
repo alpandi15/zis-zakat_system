@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { DataTable, Column } from "@/components/shared/DataTable";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { Button } from "@/components/ui/button";
@@ -214,11 +215,30 @@ export default function MuzakkiPage() {
     },
   ];
 
+  const activeMuzakkiCount = muzakkiList.filter((item) => item.is_active).length;
+
   return (
     <AppLayout title="Data Muzakki">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
-      <DataTable
+      <div className="space-y-4">
+        <PageHeader
+          title="Data Muzakki"
+          description="Daftar kepala keluarga pembayar zakat beserta anggota keluarganya."
+          icon={Users}
+          badges={
+            <>
+              <Badge variant="outline" className="rounded-full tabular-nums">
+                {muzakkiList.length} muzakki
+              </Badge>
+              <Badge variant="outline" className="rounded-full border-emerald-300 bg-emerald-50 text-emerald-700 tabular-nums">
+                {activeMuzakkiCount} aktif
+              </Badge>
+            </>
+          }
+        />
+
+        <DataTable
         title="Daftar Muzakki"
         data={muzakkiList}
         columns={columns}
@@ -285,7 +305,8 @@ export default function MuzakkiPage() {
             )}
           </div>
         )}
-      />
+        />
+      </div>
 
       <MuzakkiFormDialog
         open={isDialogOpen}

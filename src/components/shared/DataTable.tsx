@@ -10,7 +10,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Plus, FileText, FileSpreadsheet } from "lucide-react";
+import { Search, Plus, FileText, FileSpreadsheet, Inbox } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export interface Column<T> {
   key: keyof T | string;
@@ -65,13 +66,14 @@ export function DataTable<T extends { id: string }>({
     : data;
 
   return (
-    <Card className="border-border/60 bg-card/80 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/70">
+    <Card className="border-border/70 shadow-sm">
       <CardHeader className="flex flex-col gap-3 pb-3 sm:gap-4 sm:pb-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="space-y-1">
+        <div className="flex items-center gap-2">
           <CardTitle className="text-base sm:text-lg">{title}</CardTitle>
-          <p className="text-[11px] text-muted-foreground sm:text-xs">
-            Menampilkan {filteredData.length} dari {data.length} data
-          </p>
+          <Badge variant="outline" className="rounded-full text-[11px] tabular-nums">
+            {filteredData.length}
+            {filteredData.length !== data.length ? ` / ${data.length}` : ""}
+          </Badge>
         </div>
         {headerActions ? (
           <div className="w-full lg:w-auto">{headerActions}</div>
@@ -85,24 +87,24 @@ export function DataTable<T extends { id: string }>({
                   placeholder={searchPlaceholder}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-8 w-full pl-9 text-xs sm:h-9 sm:w-[220px] sm:text-sm"
+                  className="h-10 w-full rounded-xl pl-9 text-sm sm:w-[240px]"
                 />
               </div>
             )}
             {onExportPDF && (
-              <Button variant="outline" size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onExportPDF}>
+              <Button variant="outline" size="sm" className="h-10 rounded-xl text-sm" onClick={onExportPDF}>
                 <FileText className="mr-2 h-4 w-4" />
                 PDF
               </Button>
             )}
             {onExportExcel && (
-              <Button variant="outline" size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onExportExcel}>
+              <Button variant="outline" size="sm" className="h-10 rounded-xl text-sm" onClick={onExportExcel}>
                 <FileSpreadsheet className="mr-2 h-4 w-4" />
                 Excel
               </Button>
             )}
             {onAdd && !isReadOnly && (
-              <Button size="sm" className="h-8 text-xs sm:h-9 sm:text-sm" onClick={onAdd}>
+              <Button size="sm" className="h-10 rounded-xl text-sm" onClick={onAdd}>
                 <Plus className="mr-2 h-4 w-4" />
                 {addLabel}
               </Button>
@@ -113,28 +115,31 @@ export function DataTable<T extends { id: string }>({
       <CardContent>
         {isLoading ? (
           <div className="flex h-[200px] items-center justify-center">
-            <p className="text-muted-foreground">Memuat data...</p>
+            <p className="text-sm text-muted-foreground">Memuat data...</p>
           </div>
         ) : filteredData.length === 0 ? (
-          <div className="flex h-[200px] items-center justify-center">
-            <p className="text-muted-foreground">{emptyMessage}</p>
+          <div className="flex h-[220px] flex-col items-center justify-center gap-2 text-center">
+            <Inbox className="h-8 w-8 text-muted-foreground/60" />
+            <p className="text-sm text-muted-foreground">
+              {searchQuery ? "Tidak ada data yang cocok dengan pencarian." : emptyMessage}
+            </p>
           </div>
         ) : (
-          <div className="rounded-xl">
+          <div className="overflow-x-auto rounded-xl border border-border/60">
             <Table className="min-w-[640px] sm:min-w-[720px]">
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-muted/40">
                   {columns.map((column) => (
                     <TableHead key={String(column.key)} className={column.className}>
                       {column.header}
                     </TableHead>
                   ))}
-                  {actions && <TableHead className="w-[100px]">Aksi</TableHead>}
+                  {actions && <TableHead className="w-[110px] text-right">Aksi</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredData.map((item, index) => (
-                  <TableRow key={item.id}>
+                  <TableRow key={item.id} className="transition-colors">
                     {columns.map((column) => (
                       <TableCell key={String(column.key)} className={column.className}>
                         {column.render
@@ -142,7 +147,11 @@ export function DataTable<T extends { id: string }>({
                           : String(item[column.key as keyof T] ?? "-")}
                       </TableCell>
                     ))}
-                    {actions && <TableCell>{actions(item)}</TableCell>}
+                    {actions && (
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-0.5">{actions(item)}</div>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>

@@ -10,16 +10,38 @@ import { useAsnafSettings } from "@/hooks/useAsnafSettings";
 import { useDistributionCalculation, type AmilDistributionMode } from "@/hooks/useDistributionCalculation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { compareMustahikRoute } from "@/lib/mustahikRoute";
-import { Calculator, ClipboardList, Eye, PackageCheck, UserCheck, Users } from "lucide-react";
+import {
+  ArrowRight,
+  Calculator,
+  CheckCircle2,
+  ClipboardList,
+  Eye,
+  History,
+  PackageCheck,
+  Search,
+  UserCheck,
+  Users,
+} from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import type { Enums } from "@/integrations/supabase/types";
@@ -169,7 +191,10 @@ interface PackagingSourceItem {
   name?: string;
 }
 
-type DistributionTab = "distribution" | "assignment";
+type DistributionTab = "distribution" | "history" | "assignment";
+type DistributionMethod = "batch" | "manual";
+
+const HISTORY_PAGE_SIZE = 50;
 type FundCategory = Enums<"fund_category">;
 type DistributionStatus = Enums<"distribution_status">;
 
@@ -380,6 +405,25 @@ const buildPackagingSummary = (
   return { recipients, asnafGroups, groupBreakdown, totals };
 };
 
+const CATEGORY_UNIT: Record<FundCategory, "cash" | "rice" | "food"> = {
+  zakat_fitrah_cash: "cash",
+  zakat_fitrah_rice: "rice",
+  zakat_mal: "cash",
+  fidyah_cash: "cash",
+  fidyah_food: "food",
+};
+
+const formatAmount = (unit: "cash" | "rice" | "food", value: number) =>
+  unit === "cash" ? formatCurrency(value) : `${Number(value || 0).toFixed(2)} kg`;
+
+const StatTile = ({ label, value, hint }: { label: string; value: string; hint?: string }) => (
+  <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+    <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+    <p className="mt-1 text-lg font-semibold leading-tight tabular-nums">{value}</p>
+    {hint && <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">{hint}</p>}
+  </div>
+);
+
 export default function Distribution() {
   const { isReadOnly, selectedPeriod } = usePeriod();
   const { toast } = useToast();
@@ -387,12 +431,16 @@ export default function Distribution() {
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<DistributionTab>("distribution");
+  const [distributionMethod, setDistributionMethod] = useState<DistributionMethod>("batch");
   const [categoryFilter, setCategoryFilter] = useState<FundCategory | "all">("all");
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyVisible, setHistoryVisible] = useState(HISTORY_PAGE_SIZE);
   const [viewingDistribution, setViewingDistribution] = useState<Distribution | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewCategory, setPreviewCategory] = useState<FundCategory | "">("");
   const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
   const [selectedBatchId, setSelectedBatchId] = useState<string>("");
+  const [isBatchConfirmOpen, setIsBatchConfirmOpen] = useState(false);
   const [isPackagingDetailOpen, setIsPackagingDetailOpen] = useState(false);
   const [packagingDetailTab, setPackagingDetailTab] = useState<"asnaf" | "mustahik">("asnaf");
 
@@ -514,9 +562,54 @@ export default function Distribution() {
   }, [zakatDistributions, fidyahDistributions]);
 
   const filteredDistributions = useMemo(() => {
-    if (categoryFilter === "all") return mergedDistributions;
-    return mergedDistributions.filter((d) => d.fund_category === categoryFilter);
-  }, [categoryFilter, mergedDistributions]);
+    const keyword = historySearch.trim().toLowerCase();
+    return mergedDistributions.filter((d) => {
+      if (categoryFilter !== "all" && d.fund_category !== categoryFilter) return false;
+      if (keyword && !(d.mustahik?.name || "").toLowerCase().includes(keyword)) return false;
+      return true;
+    });
+  }, [categoryFilter, historySearch, mergedDistributions]);
+
+  useEffect(() => {
+    setHistoryVisible(HISTORY_PAGE_SIZE);
+  }, [categoryFilter, historySearch, selectedPeriod?.id]);
+
+  const visibleDistributions = useMemo(
+    () => filteredDistributions.slice(0, historyVisible),
+    [filteredDistributions, historyVisible],
+  );
+
+  // Sisa saldo dana per periode (ledger penerimaan dikurangi penyaluran yang sudah tercatat).
+  const balanceTotals = useMemo(
+    () =>
+      fundBalances.reduce(
+        (acc, balance) => {
+          acc.cash += Number(balance.total_cash || 0);
+          acc.rice += Number(balance.total_rice_kg || 0);
+          acc.food += Number(balance.total_food_kg || 0);
+          return acc;
+        },
+        { cash: 0, rice: 0, food: 0 },
+      ),
+    [fundBalances],
+  );
+
+  const distributedTotals = useMemo(
+    () =>
+      mergedDistributions
+        .filter((d) => d.status === "distributed" || d.status === "approved")
+        .reduce(
+          (acc, d) => {
+            acc.cash += Number(d.cash_amount || 0);
+            acc.rice += Number(d.rice_amount_kg || 0);
+            acc.food += Number(d.food_amount_kg || 0);
+            acc.recipients.add(d.mustahik_id);
+            return acc;
+          },
+          { cash: 0, rice: 0, food: 0, recipients: new Set<string>() },
+        ),
+    [mergedDistributions],
+  );
 
   const selectedBatch = useMemo(
     () => lockedBatches.find((batch) => batch.id === selectedBatchId) || null,
@@ -693,9 +786,11 @@ export default function Distribution() {
       queryClient.invalidateQueries({ queryKey: ["zakat_distributions"] });
       queryClient.invalidateQueries({ queryKey: ["fidyah_distributions"] });
       queryClient.invalidateQueries({ queryKey: ["fund-balances"] });
+      setIsBatchConfirmOpen(false);
       toast({ title: "Batch berhasil disalurkan ke daftar distribusi" });
     },
     onError: (error: Error) => {
+      setIsBatchConfirmOpen(false);
       toast({ variant: "destructive", title: "Gagal menyalurkan batch", description: error.message });
     },
   });
@@ -800,45 +895,6 @@ export default function Distribution() {
     setSelectedRecipients(newSet);
   };
 
-  const selectAll = (recipients: { mustahikId: string }[]) => {
-    const distributed = allExistingDistributions
-      .filter((d) => d.fund_category === previewCategory && (d.status === "distributed" || d.status === "approved"))
-      .map((d) => d.mustahik_id);
-
-    const eligible = recipients.filter((r) => !distributed.includes(r.mustahikId));
-    setSelectedRecipients(new Set(eligible.map((r) => r.mustahikId)));
-  };
-
-  const renderBalanceCard = (category: FundCategory) => {
-    const balance = getBalance(category);
-    const isCash = category.includes("cash") || category === "zakat_mal";
-    const isRice = category.includes("rice");
-    const calc = getCalculatedDistribution(category);
-    const totalRecipients = calc.amil.length + calc.beneficiaries.length;
-
-    return (
-      <Card key={category} className="border-border/70">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">{FUND_CATEGORY_LABELS[category]}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <p className="text-xl font-semibold">
-            {isCash ? formatCurrency(balance.total_cash) : isRice ? `${balance.total_rice_kg} kg` : `${balance.total_food_kg} kg`}
-          </p>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{totalRecipients} penerima siap distribusi</span>
-            {!isReadOnly && totalRecipients > 0 && (
-              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openPreview(category)}>
-                <Calculator className="mr-1 h-3 w-3" />
-                Jalankan
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  };
-
   const selectedBatchSummary = useMemo(() => {
     if (!selectedBatch) return null;
 
@@ -873,65 +929,23 @@ export default function Distribution() {
     return buildPackagingSummary(batchPackagingItems, mustahikMetaMap);
   }, [selectedBatch, selectedBatchItems, mustahikMetaMap]);
 
-  const renderDistributionTable = () => (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Tanggal</TableHead>
-          <TableHead>Penerima</TableHead>
-          <TableHead>Asnaf</TableHead>
-          <TableHead>Kategori</TableHead>
-          <TableHead className="text-right">Jumlah</TableHead>
-          <TableHead>Status Pendistribusian</TableHead>
-          <TableHead>Status Pengiriman</TableHead>
-          <TableHead className="text-right">Aksi</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {filteredDistributions.map((dist) => {
-          const deliveryInfo = deliveryStatusMap.get(dist.mustahik_id);
-          return (
-            <TableRow key={dist.id}>
-              <TableCell>{format(new Date(dist.distribution_date), "dd MMM yyyy", { locale: idLocale })}</TableCell>
-              <TableCell className="font-medium">{dist.mustahik?.name}</TableCell>
-              <TableCell>
-                <Badge variant={dist.mustahik?.asnaf === "amil" ? "default" : "outline"}>
-                  {getLabel(dist.mustahik?.asnaf || "")}
-                </Badge>
-              </TableCell>
-              <TableCell>{FUND_CATEGORY_LABELS[dist.fund_category]}</TableCell>
-              <TableCell className="text-right">
-                {dist.fund_category.includes("cash") || dist.fund_category === "zakat_mal"
-                  ? formatCurrency(dist.cash_amount || 0)
-                  : dist.fund_category.includes("rice")
-                    ? `${dist.rice_amount_kg || 0} kg`
-                    : `${dist.food_amount_kg || 0} kg`}
-              </TableCell>
-              <TableCell>
-                <Badge variant={STATUS_CONFIG[dist.status].variant}>{STATUS_CONFIG[dist.status].label}</Badge>
-              </TableCell>
-              <TableCell>
-                {deliveryInfo ? (
-                  <Badge variant={DELIVERY_STATUS_CONFIG[deliveryInfo.status]?.variant || "secondary"}>
-                    {DELIVERY_STATUS_CONFIG[deliveryInfo.status]?.label || deliveryInfo.status}
-                  </Badge>
-                ) : (
-                  <Badge variant="outline">Belum Ditugaskan</Badge>
-                )}
-              </TableCell>
-              <TableCell className="text-right">
-                <Button variant="ghost" size="icon" onClick={() => setViewingDistribution(dist)}>
-                  <Eye className="h-4 w-4" />
-                </Button>
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
-  );
+  const categoryRows = allCategories.map((category) => {
+    const unit = CATEGORY_UNIT[category];
+    const balance = getBalance(category);
+    const calc = getCalculatedDistribution(category);
+    const balanceValue =
+      unit === "cash" ? balance.total_cash : unit === "rice" ? balance.total_rice_kg : balance.total_food_kg;
+
+    return {
+      category,
+      unit,
+      balanceValue,
+      recipientCount: calc.amil.length + calc.beneficiaries.length,
+    };
+  });
 
   const previewCalc = getCalculatedDistribution(previewCategory);
+  const previewUnit = previewCategory ? CATEGORY_UNIT[previewCategory] : "cash";
   const previewTotal = previewCalc.amilTotal + previewCalc.beneficiaryTotal;
   const previewAmilPercent = previewTotal > 0 ? (previewCalc.amilTotal / previewTotal) * 100 : 0;
   const previewBeneficiaryPercent = previewTotal > 0 ? (previewCalc.beneficiaryTotal / previewTotal) * 100 : 0;
@@ -942,217 +956,482 @@ export default function Distribution() {
       .map((d) => d.mustahik_id),
   );
 
+  const previewRecipients = [...previewCalc.amil, ...previewCalc.beneficiaries];
+  const previewEligible = previewRecipients.filter((r) => !distributedIds.has(r.mustahikId));
+  const previewSelectedTotal = previewRecipients
+    .filter((r) => selectedRecipients.has(r.mustahikId))
+    .reduce(
+      (acc, r) => {
+        acc.cash += Number(r.cashAmount || 0);
+        acc.rice += Number(r.riceAmount || 0);
+        acc.food += Number(r.foodAmount || 0);
+        return acc;
+      },
+      { cash: 0, rice: 0, food: 0 },
+    );
+  const previewSelectedValue =
+    previewUnit === "cash" ? previewSelectedTotal.cash : previewUnit === "rice" ? previewSelectedTotal.rice : previewSelectedTotal.food;
+  const isAllEligibleSelected =
+    previewEligible.length > 0 && previewEligible.every((r) => selectedRecipients.has(r.mustahikId));
+
+  const toggleAllEligible = () => {
+    if (isAllEligibleSelected) {
+      setSelectedRecipients(new Set());
+      return;
+    }
+    setSelectedRecipients(new Set(previewEligible.map((r) => r.mustahikId)));
+  };
+
+  const toggleGroup = (recipients: { mustahikId: string }[]) => {
+    const eligible = recipients.filter((r) => !distributedIds.has(r.mustahikId));
+    const newSet = new Set(selectedRecipients);
+    if (eligible.every((r) => selectedRecipients.has(r.mustahikId))) {
+      eligible.forEach((r) => newSet.delete(r.mustahikId));
+    } else {
+      eligible.forEach((r) => newSet.add(r.mustahikId));
+    }
+    setSelectedRecipients(newSet);
+  };
+
+  const canDistributeBatch =
+    !!selectedBatch && selectedBatch.status === "locked" && !isReadOnly && selectedBatchItems.length > 0;
+
   return (
     <AppLayout title="Pendistribusian">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
       <div className="space-y-4">
-        <Card className="border-border/70 bg-gradient-to-r from-cyan-50 to-emerald-50">
-          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-            <div className="md:pt-4">
-              <h2 className="text-base font-semibold">Eksekusi Pendistribusian Dana per Periode</h2>
-              <p className="text-sm text-muted-foreground">
-                Halaman ini fokus untuk eksekusi penyaluran dan penugasan pengiriman.
+        {/* Ringkasan posisi dana periode */}
+        <section className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-[220px]">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Sisa dana belum tersalurkan · {selectedPeriod?.name || "Periode belum dipilih"}
               </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Badge variant="outline">Mode: {amilDistributionMode === "percentage" ? "Persentase Tetap" : "Rasio x Faktor"}</Badge>
-                <Badge variant="outline">Faktor: {amilShareFactor.toFixed(2)}</Badge>
-              </div>
+              <p className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">{formatCurrency(balanceTotals.cash)}</p>
+              <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                Beras {balanceTotals.rice.toFixed(2)} kg · Makanan {balanceTotals.food.toFixed(2)} kg
+              </p>
             </div>
-            <Button asChild variant="outline">
-              <Link href="/calculations">Buka Simulasi Perhitungan</Link>
-            </Button>
-          </CardContent>
-        </Card>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+                <p className="text-[11px] text-muted-foreground">Sudah tersalurkan</p>
+                <p className="text-base font-semibold tabular-nums">{formatCurrency(distributedTotals.cash)}</p>
+                <p className="text-[11px] text-muted-foreground tabular-nums">
+                  {distributedTotals.rice.toFixed(2)} kg beras · {distributedTotals.food.toFixed(2)} kg makanan
+                </p>
+              </div>
+              <div className="rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+                <p className="text-[11px] text-muted-foreground">Penerima</p>
+                <p className="text-base font-semibold tabular-nums">{distributedTotals.recipients.size} orang</p>
+                <p className="text-[11px] text-muted-foreground tabular-nums">{mergedDistributions.length} catatan</p>
+              </div>
+              <Button asChild variant="outline" className="h-[68px] rounded-xl">
+                <Link href="/calculations">
+                  Perhitungan
+                  <ArrowRight className="ml-1 h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </section>
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as DistributionTab)}>
-          <TabsList>
-            <TabsTrigger value="distribution" className="gap-1">
+          <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl p-1">
+            <TabsTrigger value="distribution" className="gap-1.5 rounded-lg">
               <PackageCheck className="h-4 w-4" />
-              Eksekusi
+              Penyaluran
             </TabsTrigger>
-            <TabsTrigger value="assignment" className="gap-1">
+            <TabsTrigger value="history" className="gap-1.5 rounded-lg">
+              <History className="h-4 w-4" />
+              Riwayat ({mergedDistributions.length})
+            </TabsTrigger>
+            <TabsTrigger value="assignment" className="gap-1.5 rounded-lg">
               <ClipboardList className="h-4 w-4" />
               Penugasan
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="distribution" className="space-y-4 mt-4">
-            <Card className="border-primary/20">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Distribusi Berdasarkan Batch Lock</CardTitle>
-                <CardDescription>
-                  Pilih batch dari menu Perhitungan, lalu salurkan sekaligus agar dana batch tercatat ke distribusi.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">Batch terkunci</p>
-                    <Select value={selectedBatchId || ""} onValueChange={setSelectedBatchId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Pilih batch" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {lockedBatches.length === 0 ? (
-                          <SelectItem value="__none" disabled>
-                            Belum ada batch
-                          </SelectItem>
-                        ) : (
-                          lockedBatches.map((batch) => (
-                            <SelectItem key={batch.id} value={batch.id}>
-                              {batch.batch_code || `BATCH-${batch.batch_no}`} • {BATCH_STATUS_LABELS[batch.status] || batch.status}
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <Button
-                    onClick={() => distributeLockedBatchMutation.mutate()}
-                    disabled={!selectedBatch || selectedBatch.status !== "locked" || distributeLockedBatchMutation.isPending || isReadOnly}
-                  >
-                    {distributeLockedBatchMutation.isPending ? "Menyalurkan..." : "Salurkan Batch"}
-                  </Button>
-                </div>
+          {/* Tab 1 - Penyaluran */}
+          <TabsContent value="distribution" className="mt-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="inline-flex rounded-xl border border-border/60 bg-muted/40 p-1">
+                <button
+                  type="button"
+                  onClick={() => setDistributionMethod("batch")}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    distributionMethod === "batch"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Dari batch terkunci
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDistributionMethod("manual")}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    distributionMethod === "manual"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Manual per kategori
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {distributionMethod === "batch"
+                  ? "Menyalurkan seluruh alokasi yang sudah dikunci di menu Perhitungan sekaligus."
+                  : "Dipakai bila tidak memakai batch. Menghitung ulang dari sisa saldo dana saat ini."}
+              </p>
+            </div>
 
-                {selectedBatch && selectedBatchSummary && (
-                  <div className="grid gap-3 md:grid-cols-5">
-                    <div className="rounded-lg border bg-muted/20 p-3">
-                      <p className="text-xs text-muted-foreground">Kode Batch</p>
-                      <p className="font-semibold">{selectedBatch.batch_code || `BATCH-${selectedBatch.batch_no}`}</p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/20 p-3">
-                      <p className="text-xs text-muted-foreground">Penerima</p>
-                      <p className="font-semibold">{selectedBatchSummary.recipientCount}</p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/20 p-3">
-                      <p className="text-xs text-muted-foreground">Total Kas</p>
-                      <p className="font-semibold">{formatCurrency(selectedBatchSummary.totalCash)}</p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/20 p-3">
-                      <p className="text-xs text-muted-foreground">Total Beras</p>
-                      <p className="font-semibold">{selectedBatchSummary.totalRice.toFixed(2)} kg</p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/20 p-3">
-                      <p className="text-xs text-muted-foreground">Total Makanan</p>
-                      <p className="font-semibold">{selectedBatchSummary.totalFood.toFixed(2)} kg</p>
-                    </div>
-                  </div>
-                )}
-
-                {selectedBatch && packagingSummary.recipients.length > 0 && (
-                  <div className="space-y-3 rounded-lg border bg-emerald-50/40 p-3">
-                    <div>
-                      <p className="text-sm font-semibold">Ringkasan Pembungkusan Batch</p>
-                      <p className="text-xs text-muted-foreground">
-                        Informasi ini memudahkan pembagian paket per mustahik dan per golongan (asnaf).
+            {distributionMethod === "batch" ? (
+              <Card className="border-border/70">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Salurkan batch terkunci</CardTitle>
+                  <CardDescription>
+                    Pilih batch, periksa ringkasannya, lalu salurkan sekali jalan. Setiap batch hanya bisa disalurkan satu kali.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {lockedBatches.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 px-4 py-10 text-center">
+                      <p className="text-sm font-medium">Belum ada batch terkunci pada periode ini.</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Kunci hasil perhitungan terlebih dahulu, atau pakai penyaluran manual per kategori.
                       </p>
+                      <Button asChild variant="outline" size="sm" className="mt-3 rounded-xl">
+                        <Link href="/calculations">Buka menu Perhitungan</Link>
+                      </Button>
                     </div>
-
-                    <div className="grid gap-2 md:grid-cols-6">
-                      <div className="rounded-md border bg-background p-2">
-                        <p className="text-[11px] text-muted-foreground">Total Uang</p>
-                        <p className="text-sm font-semibold">{formatCurrency(packagingSummary.totals.totalCash)}</p>
-                      </div>
-                      <div className="rounded-md border bg-background p-2">
-                        <p className="text-[11px] text-muted-foreground">Uang Zakat Fitrah</p>
-                        <p className="text-sm font-semibold">{formatCurrency(packagingSummary.totals.zakatFitrahCash)}</p>
-                      </div>
-                      <div className="rounded-md border bg-background p-2">
-                        <p className="text-[11px] text-muted-foreground">Uang Zakat Mal</p>
-                        <p className="text-sm font-semibold">{formatCurrency(packagingSummary.totals.zakatMalCash)}</p>
-                      </div>
-                      <div className="rounded-md border bg-background p-2">
-                        <p className="text-[11px] text-muted-foreground">Uang Fidyah</p>
-                        <p className="text-sm font-semibold">{formatCurrency(packagingSummary.totals.fidyahCash)}</p>
-                      </div>
-                      <div className="rounded-md border bg-background p-2">
-                        <p className="text-[11px] text-muted-foreground">Beras Zakat</p>
-                        <p className="text-sm font-semibold">{packagingSummary.totals.totalRiceKg.toFixed(2)} kg</p>
-                      </div>
-                      <div className="rounded-md border bg-background p-2">
-                        <p className="text-[11px] text-muted-foreground">Makanan Fidyah</p>
-                        <p className="text-sm font-semibold">{packagingSummary.totals.totalFoodKg.toFixed(2)} kg</p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-2 rounded-md border bg-background p-3 md:flex-row md:items-center md:justify-between">
-                      <p className="text-xs text-muted-foreground">
-                        Detail pembungkusan dipindah ke modal agar tampilan halaman tetap ringkas dan mudah dibaca.
-                      </p>
-                      <div className="flex gap-2">
+                  ) : (
+                    <>
+                      <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-medium text-muted-foreground">Batch</p>
+                          <Select value={selectedBatchId || ""} onValueChange={setSelectedBatchId}>
+                            <SelectTrigger className="h-10 rounded-xl">
+                              <SelectValue placeholder="Pilih batch" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {lockedBatches.map((batch) => (
+                                <SelectItem key={batch.id} value={batch.id}>
+                                  {batch.batch_code || `BATCH-${batch.batch_no}`} ·{" "}
+                                  {BATCH_STATUS_LABELS[batch.status] || batch.status} ·{" "}
+                                  {format(new Date(batch.locked_at), "dd MMM yyyy", { locale: idLocale })}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                         <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setPackagingDetailTab("asnaf");
-                            setIsPackagingDetailOpen(true);
-                          }}
+                          className="h-10 rounded-xl"
+                          onClick={() => setIsBatchConfirmOpen(true)}
+                          disabled={!canDistributeBatch || distributeLockedBatchMutation.isPending}
                         >
-                          Detail per Golongan
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setPackagingDetailTab("mustahik");
-                            setIsPackagingDetailOpen(true);
-                          }}
-                        >
-                          Detail per Mustahik
+                          {distributeLockedBatchMutation.isPending ? "Menyalurkan..." : "Salurkan batch"}
                         </Button>
                       </div>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{allCategories.map(renderBalanceCard)}</div>
+                      {selectedBatch && selectedBatch.status !== "locked" && (
+                        <div className="flex items-start gap-2 rounded-xl border border-emerald-200/70 bg-emerald-50/60 p-3 text-xs text-emerald-900">
+                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                          <p>
+                            Batch ini berstatus <span className="font-medium">{BATCH_STATUS_LABELS[selectedBatch.status] || selectedBatch.status}</span>{" "}
+                            sehingga tidak bisa disalurkan lagi. Pilih batch lain atau kunci batch baru di menu Perhitungan.
+                          </p>
+                        </div>
+                      )}
 
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <CardTitle className="text-base">Riwayat Pendistribusian</CardTitle>
-                    <CardDescription>
-                      Menampilkan seluruh distribusi zakat dan fidyah, tanpa duplikasi tab.
-                    </CardDescription>
-                  </div>
-                  <div className="w-full md:w-[260px]">
-                    <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v as FundCategory | "all") }>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Filter kategori" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Semua Kategori</SelectItem>
-                        {allCategories.map((cat) => (
-                          <SelectItem key={cat} value={cat}>
-                            {FUND_CATEGORY_LABELS[cat]}
-                          </SelectItem>
+                      {selectedBatch && selectedBatchSummary && (
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                          <StatTile
+                            label="Penerima"
+                            value={`${selectedBatchSummary.recipientCount} orang`}
+                            hint={`${selectedBatchSummary.categoryCount} kategori dana`}
+                          />
+                          <StatTile label="Total kas" value={formatCurrency(selectedBatchSummary.totalCash)} />
+                          <StatTile label="Total beras" value={`${selectedBatchSummary.totalRice.toFixed(2)} kg`} />
+                          <StatTile label="Total makanan" value={`${selectedBatchSummary.totalFood.toFixed(2)} kg`} />
+                        </div>
+                      )}
+
+                      {selectedBatch && packagingSummary.recipients.length > 0 && (
+                        <div className="rounded-2xl border border-border/60 bg-muted/20 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold">Isi paket per orang</p>
+                              <p className="text-xs text-muted-foreground">Acuan cepat saat membungkus paket batch ini.</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="rounded-xl"
+                                onClick={() => {
+                                  setPackagingDetailTab("asnaf");
+                                  setIsPackagingDetailOpen(true);
+                                }}
+                              >
+                                Per golongan
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="rounded-xl"
+                                onClick={() => {
+                                  setPackagingDetailTab("mustahik");
+                                  setIsPackagingDetailOpen(true);
+                                }}
+                              >
+                                Per mustahik
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/50 p-3">
+                              <div className="flex items-center justify-between">
+                                <p className="text-sm font-semibold text-emerald-900">Amil</p>
+                                <span className="rounded-full bg-emerald-600 px-2.5 py-0.5 text-xs font-semibold text-white">
+                                  {packagingSummary.groupBreakdown.amil.recipientCount} orang
+                                </span>
+                              </div>
+                              <p className="mt-2 text-sm font-semibold tabular-nums">
+                                {formatCurrency(packagingSummary.groupBreakdown.amil.averageCashPerRecipient)} ·{" "}
+                                {packagingSummary.groupBreakdown.amil.averageRicePerRecipient.toFixed(2)} kg
+                              </p>
+                              <p className="text-[11px] text-muted-foreground tabular-nums">
+                                Total {formatCurrency(packagingSummary.groupBreakdown.amil.totalCash)} ·{" "}
+                                {packagingSummary.groupBreakdown.amil.totalRiceKg.toFixed(2)} kg
+                              </p>
+                            </div>
+                            <div className="rounded-xl border border-sky-200/70 bg-sky-50/50 p-3">
+                              <div className="flex items-center justify-between">
+                                <p className="text-sm font-semibold text-sky-900">Non-amil</p>
+                                <span className="rounded-full bg-sky-600 px-2.5 py-0.5 text-xs font-semibold text-white">
+                                  {packagingSummary.groupBreakdown.nonAmil.recipientCount} orang
+                                </span>
+                              </div>
+                              <p className="mt-2 text-sm font-semibold tabular-nums">
+                                {formatCurrency(packagingSummary.groupBreakdown.nonAmil.averageCashPerRecipient)} ·{" "}
+                                {packagingSummary.groupBreakdown.nonAmil.averageRicePerRecipient.toFixed(2)} kg ·{" "}
+                                {packagingSummary.groupBreakdown.nonAmil.averageFoodPerRecipient.toFixed(2)} kg
+                              </p>
+                              <p className="text-[11px] text-muted-foreground tabular-nums">
+                                Total {formatCurrency(packagingSummary.groupBreakdown.nonAmil.totalCash)} ·{" "}
+                                {packagingSummary.groupBreakdown.nonAmil.totalRiceKg.toFixed(2)} kg ·{" "}
+                                {packagingSummary.groupBreakdown.nonAmil.totalFoodKg.toFixed(2)} kg
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="border-border/70">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Salurkan manual per kategori</CardTitle>
+                  <CardDescription>
+                    Saldo dihitung dari penerimaan dikurangi penyaluran yang sudah tercatat. Penerima yang sudah menerima kategori
+                    yang sama otomatis dikunci.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto rounded-xl border border-border/60">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/40">
+                          <TableHead>Kategori dana</TableHead>
+                          <TableHead className="text-right">Sisa saldo</TableHead>
+                          <TableHead className="text-right">Penerima siap</TableHead>
+                          <TableHead className="text-right">Aksi</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {categoryRows.map((row) => (
+                          <TableRow key={row.category}>
+                            <TableCell className="font-medium">{FUND_CATEGORY_LABELS[row.category]}</TableCell>
+                            <TableCell className="text-right font-semibold tabular-nums">
+                              {formatAmount(row.unit, row.balanceValue)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-muted-foreground">
+                              {row.recipientCount > 0 ? row.recipientCount : "-"}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 rounded-lg"
+                                disabled={isReadOnly || row.recipientCount === 0}
+                                onClick={() => openPreview(row.category)}
+                              >
+                                <Calculator className="mr-1 h-3.5 w-3.5" />
+                                Jalankan
+                              </Button>
+                            </TableCell>
+                          </TableRow>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </TableBody>
+                    </Table>
                   </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Baris tanpa penerima berarti saldo kosong atau belum ada mustahik yang berhak menerima kategori tersebut.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* Tab 2 - Riwayat */}
+          <TabsContent value="history" className="mt-3">
+            <Card className="border-border/70">
+              <CardHeader className="gap-3 pb-3">
+                <div>
+                  <CardTitle className="text-base">Riwayat pendistribusian</CardTitle>
+                  <CardDescription>Seluruh penyaluran zakat dan fidyah pada periode aktif.</CardDescription>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={historySearch}
+                      onChange={(e) => setHistorySearch(e.target.value)}
+                      placeholder="Cari nama penerima"
+                      className="h-10 rounded-xl pl-9"
+                    />
+                  </div>
+                  <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v as FundCategory | "all")}>
+                    <SelectTrigger className="h-10 w-full rounded-xl sm:w-[240px]">
+                      <SelectValue placeholder="Filter kategori" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Semua kategori</SelectItem>
+                      {allCategories.map((cat) => (
+                        <SelectItem key={cat} value={cat}>
+                          {FUND_CATEGORY_LABELS[cat]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </CardHeader>
               <CardContent>
                 {filteredDistributions.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-muted-foreground">Belum ada distribusi untuk filter ini.</p>
+                  <p className="py-12 text-center text-sm text-muted-foreground">
+                    {mergedDistributions.length === 0
+                      ? "Belum ada penyaluran pada periode ini."
+                      : "Tidak ada data yang cocok dengan filter."}
+                  </p>
                 ) : (
-                  renderDistributionTable()
+                  <>
+                    <div className="overflow-x-auto rounded-xl border border-border/60">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-muted/40">
+                            <TableHead>Tanggal</TableHead>
+                            <TableHead>Penerima</TableHead>
+                            <TableHead>Asnaf</TableHead>
+                            <TableHead>Kategori</TableHead>
+                            <TableHead className="text-right">Jumlah</TableHead>
+                            <TableHead>Penyaluran</TableHead>
+                            <TableHead>Pengiriman</TableHead>
+                            <TableHead className="w-12" />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {visibleDistributions.map((dist) => {
+                            const deliveryInfo = deliveryStatusMap.get(dist.mustahik_id);
+                            const statusConfig = STATUS_CONFIG[dist.status] || { label: dist.status, variant: "outline" as const };
+                            const unit = CATEGORY_UNIT[dist.fund_category as FundCategory] || "cash";
+                            const amount =
+                              unit === "cash"
+                                ? dist.cash_amount || 0
+                                : unit === "rice"
+                                  ? dist.rice_amount_kg || 0
+                                  : dist.food_amount_kg || 0;
+
+                            return (
+                              <TableRow key={dist.id}>
+                                <TableCell className="whitespace-nowrap text-muted-foreground">
+                                  {format(new Date(dist.distribution_date), "dd MMM yyyy", { locale: idLocale })}
+                                </TableCell>
+                                <TableCell className="font-medium">{dist.mustahik?.name}</TableCell>
+                                <TableCell>
+                                  <Badge variant={dist.mustahik?.asnaf === "amil" ? "default" : "outline"} className="rounded-full">
+                                    {getLabel(dist.mustahik?.asnaf || "")}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="whitespace-nowrap text-muted-foreground">
+                                  {FUND_CATEGORY_LABELS[dist.fund_category]}
+                                </TableCell>
+                                <TableCell className="text-right font-medium tabular-nums">
+                                  {formatAmount(unit, amount)}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant={statusConfig.variant} className="rounded-full">
+                                    {statusConfig.label}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {deliveryInfo ? (
+                                    <Badge
+                                      variant={DELIVERY_STATUS_CONFIG[deliveryInfo.status]?.variant || "secondary"}
+                                      className="rounded-full"
+                                    >
+                                      {DELIVERY_STATUS_CONFIG[deliveryInfo.status]?.label || deliveryInfo.status}
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="rounded-full">
+                                      Belum ditugaskan
+                                    </Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button variant="ghost" size="icon" onClick={() => setViewingDistribution(dist)}>
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        Menampilkan {visibleDistributions.length} dari {filteredDistributions.length} catatan.
+                      </p>
+                      {visibleDistributions.length < filteredDistributions.length && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-xl"
+                          onClick={() => setHistoryVisible((prev) => prev + HISTORY_PAGE_SIZE)}
+                        >
+                          Muat lebih banyak
+                        </Button>
+                      )}
+                    </div>
+                  </>
                 )}
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="assignment" className="mt-4">
+          {/* Tab 3 - Penugasan */}
+          <TabsContent value="assignment" className="mt-3">
             {selectedPeriod?.id ? (
               <DistributionAssignmentTab periodId={selectedPeriod.id} isReadOnly={isReadOnly} />
             ) : (
-              <Card>
-                <CardContent className="py-10 text-center text-sm text-muted-foreground">
+              <Card className="border-border/70">
+                <CardContent className="py-12 text-center text-sm text-muted-foreground">
                   Pilih periode untuk melihat penugasan distribusi.
                 </CardContent>
               </Card>
@@ -1161,189 +1440,137 @@ export default function Distribution() {
         </Tabs>
       </div>
 
+      <AlertDialog open={isBatchConfirmOpen} onOpenChange={setIsBatchConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Salurkan batch ini?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  Seluruh alokasi{" "}
+                  <span className="font-medium text-foreground">
+                    {selectedBatch?.batch_code || (selectedBatch ? `BATCH-${selectedBatch.batch_no}` : "-")}
+                  </span>{" "}
+                  akan dicatat sebagai distribusi dan saldo dana ikut berkurang. Tindakan ini tidak bisa dibatalkan dari
+                  halaman ini.
+                </p>
+                {selectedBatchSummary && (
+                  <p className="tabular-nums">
+                    {selectedBatchSummary.recipientCount} penerima · {formatCurrency(selectedBatchSummary.totalCash)} ·{" "}
+                    {selectedBatchSummary.totalRice.toFixed(2)} kg beras · {selectedBatchSummary.totalFood.toFixed(2)} kg makanan
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={distributeLockedBatchMutation.isPending}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                distributeLockedBatchMutation.mutate();
+              }}
+              disabled={distributeLockedBatchMutation.isPending}
+            >
+              {distributeLockedBatchMutation.isPending ? "Menyalurkan..." : "Ya, salurkan"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Dialog open={isPackagingDetailOpen} onOpenChange={setIsPackagingDetailOpen}>
-        <DialogContent className="max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[92dvh] max-w-6xl overflow-y-auto">
+        <DialogContent className="max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[92dvh] max-w-5xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Detail Pembungkusan {selectedBatch ? `- ${selectedBatch.batch_code || `BATCH-${selectedBatch.batch_no}`}` : ""}</DialogTitle>
+            <DialogTitle>
+              Rincian paket {selectedBatch ? `· ${selectedBatch.batch_code || `BATCH-${selectedBatch.batch_no}`}` : ""}
+            </DialogTitle>
           </DialogHeader>
 
           {packagingSummary.recipients.length > 0 ? (
-            <div className="space-y-4">
-              <div className="grid gap-2 md:grid-cols-6">
-                <div className="rounded-md border bg-muted/20 p-2">
-                  <p className="text-[11px] text-muted-foreground">Total Uang</p>
-                  <p className="text-sm font-semibold">{formatCurrency(packagingSummary.totals.totalCash)}</p>
-                </div>
-                <div className="rounded-md border bg-muted/20 p-2">
-                  <p className="text-[11px] text-muted-foreground">Uang Zakat Fitrah</p>
-                  <p className="text-sm font-semibold">{formatCurrency(packagingSummary.totals.zakatFitrahCash)}</p>
-                </div>
-                <div className="rounded-md border bg-muted/20 p-2">
-                  <p className="text-[11px] text-muted-foreground">Uang Zakat Mal</p>
-                  <p className="text-sm font-semibold">{formatCurrency(packagingSummary.totals.zakatMalCash)}</p>
-                </div>
-                <div className="rounded-md border bg-muted/20 p-2">
-                  <p className="text-[11px] text-muted-foreground">Uang Fidyah</p>
-                  <p className="text-sm font-semibold">{formatCurrency(packagingSummary.totals.fidyahCash)}</p>
-                </div>
-                <div className="rounded-md border bg-muted/20 p-2">
-                  <p className="text-[11px] text-muted-foreground">Beras Zakat</p>
-                  <p className="text-sm font-semibold">{packagingSummary.totals.totalRiceKg.toFixed(2)} kg</p>
-                </div>
-                <div className="rounded-md border bg-muted/20 p-2">
-                  <p className="text-[11px] text-muted-foreground">Makanan Fidyah</p>
-                  <p className="text-sm font-semibold">{packagingSummary.totals.totalFoodKg.toFixed(2)} kg</p>
-                </div>
-              </div>
+            <Tabs value={packagingDetailTab} onValueChange={(v) => setPackagingDetailTab(v as "asnaf" | "mustahik")}>
+              <TabsList className="rounded-xl">
+                <TabsTrigger value="asnaf" className="rounded-lg">
+                  Per golongan
+                </TabsTrigger>
+                <TabsTrigger value="mustahik" className="rounded-lg">
+                  Per mustahik ({packagingSummary.recipients.length})
+                </TabsTrigger>
+              </TabsList>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-sm font-semibold">Kelompok Amil</p>
-                    <Badge>{packagingSummary.groupBreakdown.amil.recipientCount} orang</Badge>
-                  </div>
-                  <div className="grid gap-2 text-xs sm:grid-cols-2 sm:text-sm">
-                    <div className="rounded-md border bg-background/80 p-2">
-                      <p className="text-muted-foreground">Total Uang</p>
-                      <p className="font-semibold">{formatCurrency(packagingSummary.groupBreakdown.amil.totalCash)}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        Rata-rata: {formatCurrency(packagingSummary.groupBreakdown.amil.averageCashPerRecipient)}/orang
-                      </p>
-                    </div>
-                    <div className="rounded-md border bg-background/80 p-2">
-                      <p className="text-muted-foreground">Total Beras</p>
-                      <p className="font-semibold">{packagingSummary.groupBreakdown.amil.totalRiceKg.toFixed(2)} kg</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        Rata-rata: {packagingSummary.groupBreakdown.amil.averageRicePerRecipient.toFixed(2)} kg/orang
-                      </p>
-                    </div>
-                    <div className="rounded-md border bg-background/80 p-2 sm:col-span-2">
-                      <p className="text-muted-foreground">Detail Uang</p>
-                      <p className="font-medium">
-                        ZF {formatCurrency(packagingSummary.groupBreakdown.amil.zakatFitrahCash)} | ZM{" "}
-                        {formatCurrency(packagingSummary.groupBreakdown.amil.zakatMalCash)} | FD{" "}
-                        {formatCurrency(packagingSummary.groupBreakdown.amil.fidyahCash)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-sm font-semibold">Kelompok Non-Amil</p>
-                    <Badge variant="outline">{packagingSummary.groupBreakdown.nonAmil.recipientCount} orang</Badge>
-                  </div>
-                  <div className="grid gap-2 text-xs sm:grid-cols-2 sm:text-sm">
-                    <div className="rounded-md border bg-background/80 p-2">
-                      <p className="text-muted-foreground">Total Uang</p>
-                      <p className="font-semibold">{formatCurrency(packagingSummary.groupBreakdown.nonAmil.totalCash)}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        Rata-rata: {formatCurrency(packagingSummary.groupBreakdown.nonAmil.averageCashPerRecipient)}/orang
-                      </p>
-                    </div>
-                    <div className="rounded-md border bg-background/80 p-2">
-                      <p className="text-muted-foreground">Total Beras</p>
-                      <p className="font-semibold">{packagingSummary.groupBreakdown.nonAmil.totalRiceKg.toFixed(2)} kg</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        Rata-rata: {packagingSummary.groupBreakdown.nonAmil.averageRicePerRecipient.toFixed(2)} kg/orang
-                      </p>
-                    </div>
-                    <div className="rounded-md border bg-background/80 p-2 sm:col-span-2">
-                      <p className="text-muted-foreground">Detail Uang</p>
-                      <p className="font-medium">
-                        ZF {formatCurrency(packagingSummary.groupBreakdown.nonAmil.zakatFitrahCash)} | ZM{" "}
-                        {formatCurrency(packagingSummary.groupBreakdown.nonAmil.zakatMalCash)} | FD{" "}
-                        {formatCurrency(packagingSummary.groupBreakdown.nonAmil.fidyahCash)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <p className="text-xs text-muted-foreground">
-                Catatan: nilai <span className="font-medium">rata-rata/orang</span> dipakai untuk mempermudah pembungkusan cepat.
-                Detail nominal tiap penerima tetap lihat tab <span className="font-medium">Per Mustahik</span>.
-              </p>
-
-              <Tabs value={packagingDetailTab} onValueChange={(v) => setPackagingDetailTab(v as "asnaf" | "mustahik")}>
-                <TabsList>
-                  <TabsTrigger value="asnaf">Per Golongan</TabsTrigger>
-                  <TabsTrigger value="mustahik">Per Mustahik</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="asnaf" className="mt-3">
-                  <div className="overflow-x-auto rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Golongan</TableHead>
-                          <TableHead className="text-right">Mustahik</TableHead>
-                          <TableHead className="text-right">Total Uang</TableHead>
-                          <TableHead className="text-right">Beras</TableHead>
-                          <TableHead className="text-right">Makanan</TableHead>
-                          <TableHead className="text-right">Detail Uang</TableHead>
+              <TabsContent value="asnaf" className="mt-3">
+                <div className="overflow-x-auto rounded-xl border border-border/60">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40">
+                        <TableHead>Golongan</TableHead>
+                        <TableHead className="text-right">Orang</TableHead>
+                        <TableHead className="text-right">Uang</TableHead>
+                        <TableHead className="text-right">Beras</TableHead>
+                        <TableHead className="text-right">Makanan</TableHead>
+                        <TableHead className="text-right">ZF / ZM / Fidyah</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {packagingSummary.asnafGroups.map((group) => (
+                        <TableRow key={group.asnafCode}>
+                          <TableCell>
+                            <Badge variant={group.asnafCode === "amil" ? "default" : "outline"} className="rounded-full">
+                              {getLabel(group.asnafCode)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{group.recipientCount}</TableCell>
+                          <TableCell className="text-right font-medium tabular-nums">{formatCurrency(group.totalCash)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{group.totalRiceKg.toFixed(2)} kg</TableCell>
+                          <TableCell className="text-right tabular-nums">{group.totalFoodKg.toFixed(2)} kg</TableCell>
+                          <TableCell className="whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+                            {formatCurrency(group.zakatFitrahCash)} / {formatCurrency(group.zakatMalCash)} /{" "}
+                            {formatCurrency(group.fidyahCash)}
+                          </TableCell>
                         </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {packagingSummary.asnafGroups.map((group) => (
-                          <TableRow key={group.asnafCode}>
-                            <TableCell>
-                              <Badge variant={group.asnafCode === "amil" ? "default" : "outline"}>{getLabel(group.asnafCode)}</Badge>
-                            </TableCell>
-                            <TableCell className="text-right">{group.recipientCount}</TableCell>
-                            <TableCell className="text-right font-medium">{formatCurrency(group.totalCash)}</TableCell>
-                            <TableCell className="text-right">{group.totalRiceKg.toFixed(2)} kg</TableCell>
-                            <TableCell className="text-right">{group.totalFoodKg.toFixed(2)} kg</TableCell>
-                            <TableCell className="text-right text-xs text-muted-foreground">
-                              ZF {formatCurrency(group.zakatFitrahCash)} | ZM {formatCurrency(group.zakatMalCash)} | FD{" "}
-                              {formatCurrency(group.fidyahCash)}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </TabsContent>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </TabsContent>
 
-                <TabsContent value="mustahik" className="mt-3">
-                  <div className="max-h-[58vh] overflow-auto rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Nama</TableHead>
-                          <TableHead>Golongan</TableHead>
-                          <TableHead className="text-right">Total Uang</TableHead>
-                          <TableHead className="text-right">Beras</TableHead>
-                          <TableHead className="text-right">Makanan</TableHead>
-                          <TableHead className="text-right">Detail Uang</TableHead>
+              <TabsContent value="mustahik" className="mt-3">
+                <div className="max-h-[58vh] overflow-auto rounded-xl border border-border/60">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40">
+                        <TableHead>Nama</TableHead>
+                        <TableHead>Golongan</TableHead>
+                        <TableHead className="text-right">Uang</TableHead>
+                        <TableHead className="text-right">Beras</TableHead>
+                        <TableHead className="text-right">Makanan</TableHead>
+                        <TableHead className="text-right">ZF / ZM / Fidyah</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {packagingSummary.recipients.map((recipient) => (
+                        <TableRow key={recipient.mustahikId}>
+                          <TableCell className="font-medium">{recipient.name}</TableCell>
+                          <TableCell>
+                            <Badge variant={recipient.asnafCode === "amil" ? "default" : "outline"} className="rounded-full">
+                              {getLabel(recipient.asnafCode)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-medium tabular-nums">{formatCurrency(recipient.totalCash)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{recipient.totalRiceKg.toFixed(2)} kg</TableCell>
+                          <TableCell className="text-right tabular-nums">{recipient.totalFoodKg.toFixed(2)} kg</TableCell>
+                          <TableCell className="whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+                            {formatCurrency(recipient.zakatFitrahCash)} / {formatCurrency(recipient.zakatMalCash)} /{" "}
+                            {formatCurrency(recipient.fidyahCash)}
+                          </TableCell>
                         </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {packagingSummary.recipients.map((recipient) => (
-                          <TableRow key={recipient.mustahikId}>
-                            <TableCell className="font-medium">{recipient.name}</TableCell>
-                            <TableCell>
-                              <Badge variant={recipient.asnafCode === "amil" ? "default" : "outline"}>
-                                {getLabel(recipient.asnafCode)}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right font-medium">{formatCurrency(recipient.totalCash)}</TableCell>
-                            <TableCell className="text-right">{recipient.totalRiceKg.toFixed(2)} kg</TableCell>
-                            <TableCell className="text-right">{recipient.totalFoodKg.toFixed(2)} kg</TableCell>
-                            <TableCell className="text-right text-xs text-muted-foreground">
-                              ZF {formatCurrency(recipient.zakatFitrahCash)} | ZM {formatCurrency(recipient.zakatMalCash)} | FD{" "}
-                              {formatCurrency(recipient.fidyahCash)}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </div>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </TabsContent>
+            </Tabs>
           ) : (
-            <p className="py-6 text-center text-sm text-muted-foreground">Belum ada data pembungkusan untuk batch ini.</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">Belum ada data paket untuk batch ini.</p>
           )}
         </DialogContent>
       </Dialog>
@@ -1351,174 +1578,186 @@ export default function Distribution() {
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] max-w-3xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Calculator className="h-5 w-5" />
-              Eksekusi Pendistribusian - {FUND_CATEGORY_LABELS[previewCategory]}
-            </DialogTitle>
+            <DialogTitle>Salurkan {previewCategory ? FUND_CATEGORY_LABELS[previewCategory] : ""}</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-muted/20 p-3">
+              <div className="text-xs text-muted-foreground">
+                <p className="tabular-nums">
+                  Total dana <span className="font-medium text-foreground">{formatAmount(previewUnit, previewTotal)}</span> ·
+                  Amil {previewAmilPercent.toFixed(1)}% · Mustahik {previewBeneficiaryPercent.toFixed(1)}%
+                </p>
+                <p className="mt-0.5">
+                  {amilDistributionMode === "proportional_with_factor"
+                    ? "Sisa dana setelah porsi amil dibagi rata ke mustahik non-amil."
+                    : "Pembagian non-amil mengikuti bobot prioritas dan jumlah anggota keluarga."}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl"
+                disabled={previewEligible.length === 0}
+                onClick={toggleAllEligible}
+              >
+                {isAllEligibleSelected ? "Batal pilih semua" : `Pilih semua (${previewEligible.length})`}
+              </Button>
+            </div>
+
             {previewCalc.amil.length > 0 && (
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-sm">
-                    <UserCheck className="h-4 w-4" />
-                    Amil ({previewAmilPercent.toFixed(1)}% = {previewCategory.includes("cash") || previewCategory === "zakat_mal"
-                      ? formatCurrency(previewCalc.amilTotal)
-                      : `${previewCalc.amilTotal.toFixed(2)} kg`})
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12">
-                          <Checkbox
-                            checked={previewCalc.amil.every((a) => selectedRecipients.has(a.mustahikId) || distributedIds.has(a.mustahikId))}
-                            onCheckedChange={() => {
-                              const eligible = previewCalc.amil.filter((a) => !distributedIds.has(a.mustahikId));
-                              if (eligible.every((a) => selectedRecipients.has(a.mustahikId))) {
-                                const newSet = new Set(selectedRecipients);
-                                eligible.forEach((a) => newSet.delete(a.mustahikId));
-                                setSelectedRecipients(newSet);
-                              } else {
-                                const newSet = new Set(selectedRecipients);
-                                eligible.forEach((a) => newSet.add(a.mustahikId));
-                                setSelectedRecipients(newSet);
-                              }
-                            }}
-                          />
-                        </TableHead>
-                        <TableHead>Nama</TableHead>
-                        <TableHead className="text-right">Jumlah</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {previewCalc.amil.map((a) => {
-                        const isDistributed = distributedIds.has(a.mustahikId);
-                        return (
-                          <TableRow key={a.mustahikId} className={isDistributed ? "opacity-50" : ""}>
-                            <TableCell>
-                              <Checkbox
-                                checked={selectedRecipients.has(a.mustahikId) || isDistributed}
-                                disabled={isDistributed}
-                                onCheckedChange={() => toggleRecipient(a.mustahikId)}
-                              />
-                            </TableCell>
-                            <TableCell className="font-medium">{a.name}</TableCell>
-                            <TableCell className="text-right">
-                              {a.cashAmount > 0 ? formatCurrency(a.cashAmount) : `${a.riceAmount || a.foodAmount} kg`}
-                            </TableCell>
-                            <TableCell>
-                              {isDistributed ? <Badge variant="outline">Sudah Disalurkan</Badge> : <Badge variant="secondary">Belum</Badge>}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+              <div className="rounded-xl border border-border/60">
+                <div className="flex items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-2">
+                  <UserCheck className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm font-medium">
+                    Amil · {formatAmount(previewUnit, previewCalc.amilTotal)}
+                  </p>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">
+                        <Checkbox
+                          checked={previewCalc.amil
+                            .filter((a) => !distributedIds.has(a.mustahikId))
+                            .every((a) => selectedRecipients.has(a.mustahikId))}
+                          onCheckedChange={() => toggleGroup(previewCalc.amil)}
+                        />
+                      </TableHead>
+                      <TableHead>Nama</TableHead>
+                      <TableHead className="text-right">Jumlah</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {previewCalc.amil.map((a) => {
+                      const isDistributed = distributedIds.has(a.mustahikId);
+                      return (
+                        <TableRow key={a.mustahikId} className={isDistributed ? "opacity-50" : ""}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedRecipients.has(a.mustahikId) || isDistributed}
+                              disabled={isDistributed}
+                              onCheckedChange={() => toggleRecipient(a.mustahikId)}
+                            />
+                          </TableCell>
+                          <TableCell className="font-medium">{a.name}</TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatAmount(previewUnit, a.cashAmount || a.riceAmount || a.foodAmount)}
+                          </TableCell>
+                          <TableCell>
+                            {isDistributed ? (
+                              <Badge variant="outline" className="rounded-full">
+                                Sudah disalurkan
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary" className="rounded-full">
+                                Belum
+                              </Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             )}
 
             {previewCalc.beneficiaries.length > 0 && (
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-sm">
-                    <Users className="h-4 w-4" />
-                    Mustahik ({previewBeneficiaryPercent.toFixed(1)}% = {previewCategory.includes("cash") || previewCategory === "zakat_mal"
-                      ? formatCurrency(previewCalc.beneficiaryTotal)
-                      : `${previewCalc.beneficiaryTotal.toFixed(2)} kg`})
-                  </CardTitle>
-                  <CardDescription>
-                    {amilDistributionMode === "proportional_with_factor"
-                      ? "Sisa dana setelah porsi amil akan dibagi rata ke mustahik non-amil."
-                      : "Pembagian mustahik non-amil berdasarkan prioritas dan jumlah keluarga."}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="mb-2">
-                    <Button variant="outline" size="sm" onClick={() => selectAll(previewCalc.beneficiaries)}>
-                      Pilih Semua yang Belum Disalurkan
-                    </Button>
-                  </div>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12">
-                          <Checkbox
-                            checked={previewCalc.beneficiaries.every((b) => selectedRecipients.has(b.mustahikId) || distributedIds.has(b.mustahikId))}
-                            onCheckedChange={() => {
-                              const eligible = previewCalc.beneficiaries.filter((b) => !distributedIds.has(b.mustahikId));
-                              if (eligible.every((b) => selectedRecipients.has(b.mustahikId))) {
-                                const newSet = new Set(selectedRecipients);
-                                eligible.forEach((b) => newSet.delete(b.mustahikId));
-                                setSelectedRecipients(newSet);
-                              } else {
-                                const newSet = new Set(selectedRecipients);
-                                eligible.forEach((b) => newSet.add(b.mustahikId));
-                                setSelectedRecipients(newSet);
-                              }
-                            }}
-                          />
-                        </TableHead>
-                        <TableHead>Nama</TableHead>
-                        <TableHead>Asnaf</TableHead>
-                        <TableHead>Prioritas</TableHead>
-                        <TableHead className="text-right">Jumlah</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {previewCalc.beneficiaries.map((b) => {
-                        const isDistributed = distributedIds.has(b.mustahikId);
-                        return (
-                          <TableRow key={b.mustahikId} className={isDistributed ? "opacity-50" : ""}>
-                            <TableCell>
-                              <Checkbox
-                                checked={selectedRecipients.has(b.mustahikId) || isDistributed}
-                                disabled={isDistributed}
-                                onCheckedChange={() => toggleRecipient(b.mustahikId)}
-                              />
-                            </TableCell>
-                            <TableCell className="font-medium">{b.name}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline">{getLabel(b.asnaf)}</Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="secondary">{PRIORITY_LABELS[b.priority] || b.priority}</Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {b.cashAmount > 0 ? formatCurrency(b.cashAmount) : `${b.riceAmount || b.foodAmount} kg`}
-                            </TableCell>
-                            <TableCell>
-                              {isDistributed ? <Badge variant="outline">Sudah Disalurkan</Badge> : <Badge variant="secondary">Belum</Badge>}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+              <div className="rounded-xl border border-border/60">
+                <div className="flex items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-2">
+                  <Users className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm font-medium">
+                    Mustahik non-amil · {formatAmount(previewUnit, previewCalc.beneficiaryTotal)}
+                  </p>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">
+                        <Checkbox
+                          checked={previewCalc.beneficiaries
+                            .filter((b) => !distributedIds.has(b.mustahikId))
+                            .every((b) => selectedRecipients.has(b.mustahikId))}
+                          onCheckedChange={() => toggleGroup(previewCalc.beneficiaries)}
+                        />
+                      </TableHead>
+                      <TableHead>Nama</TableHead>
+                      <TableHead>Asnaf</TableHead>
+                      <TableHead>Prioritas</TableHead>
+                      <TableHead className="text-right">Jumlah</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {previewCalc.beneficiaries.map((b) => {
+                      const isDistributed = distributedIds.has(b.mustahikId);
+                      return (
+                        <TableRow key={b.mustahikId} className={isDistributed ? "opacity-50" : ""}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedRecipients.has(b.mustahikId) || isDistributed}
+                              disabled={isDistributed}
+                              onCheckedChange={() => toggleRecipient(b.mustahikId)}
+                            />
+                          </TableCell>
+                          <TableCell className="font-medium">{b.name}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="rounded-full">
+                              {getLabel(b.asnaf)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className="rounded-full">
+                              {PRIORITY_LABELS[b.priority] || b.priority}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatAmount(previewUnit, b.cashAmount || b.riceAmount || b.foodAmount)}
+                          </TableCell>
+                          <TableCell>
+                            {isDistributed ? (
+                              <Badge variant="outline" className="rounded-full">
+                                Sudah disalurkan
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary" className="rounded-full">
+                                Belum
+                              </Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             )}
 
             {previewCalc.amil.length === 0 && previewCalc.beneficiaries.length === 0 && (
-              <p className="py-8 text-center text-muted-foreground">Tidak ada penerima yang layak terima atau saldo dana kosong.</p>
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                Tidak ada penerima yang berhak, atau saldo dana kategori ini kosong.
+              </p>
             )}
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsPreviewOpen(false)}>
-              Batal
-            </Button>
-            <Button
-              onClick={() => batchDistributeMutation.mutate()}
-              disabled={selectedRecipients.size === 0 || batchDistributeMutation.isPending}
-            >
-              Salurkan ({selectedRecipients.size} penerima)
-            </Button>
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground tabular-nums">
+              Terpilih {selectedRecipients.size} penerima · {formatAmount(previewUnit, previewSelectedValue)}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" className="rounded-xl" onClick={() => setIsPreviewOpen(false)}>
+                Batal
+              </Button>
+              <Button
+                className="rounded-xl"
+                onClick={() => batchDistributeMutation.mutate()}
+                disabled={selectedRecipients.size === 0 || isReadOnly || batchDistributeMutation.isPending}
+              >
+                {batchDistributeMutation.isPending ? "Menyalurkan..." : `Salurkan ${selectedRecipients.size} penerima`}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1526,52 +1765,56 @@ export default function Distribution() {
       <Dialog open={!!viewingDistribution} onOpenChange={() => setViewingDistribution(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Detail Pendistribusian</DialogTitle>
+            <DialogTitle>Detail pendistribusian</DialogTitle>
           </DialogHeader>
           {viewingDistribution && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground">Tanggal</p>
-                  <p className="font-medium">
-                    {format(new Date(viewingDistribution.distribution_date), "dd MMMM yyyy", { locale: idLocale })}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Penerima</p>
-                  <p className="font-medium">{viewingDistribution.mustahik?.name}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Asnaf</p>
-                  <p className="font-medium">{getLabel(viewingDistribution.mustahik?.asnaf || "")}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Kategori</p>
-                  <p className="font-medium">{FUND_CATEGORY_LABELS[viewingDistribution.fund_category]}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Jumlah</p>
-                  <p className="text-xl font-bold">
-                    {viewingDistribution.fund_category.includes("cash") || viewingDistribution.fund_category === "zakat_mal"
-                      ? formatCurrency(viewingDistribution.cash_amount || 0)
-                      : viewingDistribution.fund_category.includes("rice")
-                        ? `${viewingDistribution.rice_amount_kg || 0} kg`
-                        : `${viewingDistribution.food_amount_kg || 0} kg`}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Status</p>
-                  <Badge variant={STATUS_CONFIG[viewingDistribution.status].variant}>
-                    {STATUS_CONFIG[viewingDistribution.status].label}
-                  </Badge>
-                </div>
-                {viewingDistribution.notes && (
-                  <div className="col-span-2">
-                    <p className="text-muted-foreground">Catatan</p>
-                    <p>{viewingDistribution.notes}</p>
-                  </div>
-                )}
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground">Tanggal</p>
+                <p className="font-medium">
+                  {format(new Date(viewingDistribution.distribution_date), "dd MMMM yyyy", { locale: idLocale })}
+                </p>
               </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Penerima</p>
+                <p className="font-medium">{viewingDistribution.mustahik?.name}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Asnaf</p>
+                <p className="font-medium">{getLabel(viewingDistribution.mustahik?.asnaf || "")}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Kategori</p>
+                <p className="font-medium">{FUND_CATEGORY_LABELS[viewingDistribution.fund_category]}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Jumlah</p>
+                <p className="text-xl font-semibold tabular-nums">
+                  {formatAmount(
+                    CATEGORY_UNIT[viewingDistribution.fund_category as FundCategory] || "cash",
+                    (CATEGORY_UNIT[viewingDistribution.fund_category as FundCategory] || "cash") === "cash"
+                      ? viewingDistribution.cash_amount || 0
+                      : (CATEGORY_UNIT[viewingDistribution.fund_category as FundCategory] || "cash") === "rice"
+                        ? viewingDistribution.rice_amount_kg || 0
+                        : viewingDistribution.food_amount_kg || 0,
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Status</p>
+                <Badge
+                  variant={(STATUS_CONFIG[viewingDistribution.status] || { variant: "outline" as const }).variant}
+                  className="rounded-full"
+                >
+                  {(STATUS_CONFIG[viewingDistribution.status] || { label: viewingDistribution.status }).label}
+                </Badge>
+              </div>
+              {viewingDistribution.notes && (
+                <div className="col-span-2">
+                  <p className="text-xs text-muted-foreground">Catatan</p>
+                  <p>{viewingDistribution.notes}</p>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

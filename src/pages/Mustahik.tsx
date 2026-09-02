@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { DataTable, Column } from "@/components/shared/DataTable";
+import { PageHeader, StatTile } from "@/components/shared/PageHeader";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
 import { AsnafEligibilityBadges } from "@/components/shared/AsnafEligibilityBadges";
 import { CreatableSingleSelect } from "@/components/shared/CreatableSingleSelect";
@@ -45,7 +46,10 @@ import {
   Download,
   Edit,
   Eye,
+  Filter,
+  HeartHandshake,
   MapPin,
+  Plus,
   Route,
   Search,
   StickyNote,
@@ -634,154 +638,137 @@ export default function MustahikPage() {
   return (
     <AppLayout title="Data Mustahik">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
-      {!isRouteFieldsAvailable && (
-        <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-950 [&>svg]:text-amber-700">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Field wilayah distribusi belum aktif di database</AlertTitle>
-          <AlertDescription>
-            Jalankan <code>supabase db push</code> atau eksekusi migration terbaru agar field
-            <code> distribution_rt</code>, <code>distribution_lane</code>, dan <code>delivery_order</code> aktif.
-          </AlertDescription>
-        </Alert>
-      )}
 
-      <DataTable
-        title="Daftar Mustahik"
-        data={filteredMustahikList}
-        columns={columns}
-        isLoading={isLoading}
-        isReadOnly={isReadOnly}
-        emptyMessage="Belum ada data mustahik"
-        headerActions={
-          <div className="flex w-full flex-col gap-3 lg:min-w-[760px]">
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(260px,1fr)_auto_auto]">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Total</p>
-                  <p className="mt-1 text-base font-semibold">{mustahikList.length}</p>
-                </div>
-                <div className="rounded-2xl border border-emerald-200/70 bg-emerald-50/70 px-3 py-2 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-700">Amil</p>
-                  <p className="mt-1 text-base font-semibold text-emerald-900">{amilCount}</p>
-                </div>
-                <div className="rounded-2xl border border-sky-200/70 bg-sky-50/70 px-3 py-2 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-sky-700">Non-Amil</p>
-                  <p className="mt-1 text-base font-semibold text-sky-900">{nonAmilCount}</p>
-                </div>
-                <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Tersaring</p>
-                  <p className="mt-1 flex items-center gap-1 text-base font-semibold">
-                    <UserCheck className="h-4 w-4 text-primary" />
-                    {filteredMustahikList.length}
-                  </p>
-                </div>
-              </div>
-
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 md:top-1/3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Cari nama, alamat, RT, gang, asnaf, atau catatan..."
-                  className="h-11 rounded-2xl border-border/70 bg-background/85 pl-10 pr-4 text-sm shadow-sm"
-                />
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 rounded-2xl px-4 text-sm"
-                onClick={handleExportPDF}
-              >
+      <div className="space-y-4">
+        <PageHeader
+          title="Data Mustahik"
+          description="Daftar penerima zakat beserta golongan, prioritas, dan rute distribusinya."
+          icon={HeartHandshake}
+          badges={
+            <>
+              <Badge variant="outline" className="rounded-full tabular-nums">
+                {mustahikList.length} mustahik
+              </Badge>
+              <Badge variant="outline" className="rounded-full border-emerald-300 bg-emerald-50 text-emerald-700 tabular-nums">
+                {amilCount} amil
+              </Badge>
+            </>
+          }
+          actions={
+            <>
+              <Button type="button" variant="outline" className="h-10 rounded-xl" onClick={handleExportPDF}>
                 <Download className="mr-2 h-4 w-4" />
                 Download PDF
               </Button>
-
               {!isReadOnly && (
                 <Button
-                  className="h-11 rounded-2xl px-5 text-sm"
+                  className="h-10 rounded-xl"
                   onClick={() => {
                     resetForm();
                     setEditingMustahik(null);
                     setIsDialogOpen(true);
                   }}
                 >
+                  <Plus className="mr-2 h-4 w-4" />
                   Tambah Mustahik
                 </Button>
               )}
-            </div>
+            </>
+          }
+        />
 
-            <div className="grid gap-3 lg:grid-cols-[220px_220px_220px_auto]">
-              <div className="rounded-2xl border border-border/70 bg-background/85 p-2 shadow-sm">
-                <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                  Kategori
-                </p>
-                <Select value={asnafFilter} onValueChange={(value) => setAsnafFilter(value as "all" | "amil" | "non_amil") }>
-                  <SelectTrigger className="h-10 rounded-xl border-0 bg-transparent text-sm shadow-none focus:ring-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Semua Asnaf</SelectItem>
-                    <SelectItem value="amil">Amil Saja</SelectItem>
-                    <SelectItem value="non_amil">Selain Amil</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+        {!isRouteFieldsAvailable && (
+          <Alert className="border-amber-200 bg-amber-50 text-amber-950 [&>svg]:text-amber-700">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Field wilayah distribusi belum aktif di database</AlertTitle>
+            <AlertDescription>
+              Jalankan <code>supabase db push</code> atau eksekusi migration terbaru agar field
+              <code> distribution_rt</code>, <code>distribution_lane</code>, dan <code>delivery_order</code> aktif.
+            </AlertDescription>
+          </Alert>
+        )}
 
-              <div className="rounded-2xl border border-border/70 bg-background/85 p-2 shadow-sm">
-                <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                  RT / Wilayah
-                </p>
-                <CreatableSingleSelect
-                  value={rtFilter === "all" ? "" : rtFilter}
-                  onChange={(value) => {
-                    setRtFilter(value.trim() ? value : "all");
-                    setLaneFilter("all");
-                  }}
-                  options={rtOptions}
-                  placeholder="Semua RT"
-                  searchPlaceholder="Cari RT / wilayah..."
-                  emptyLabel="RT / wilayah tidak ditemukan"
-                  allowCreate={false}
+        <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <StatTile label="Total Mustahik" value={mustahikList.length.toLocaleString("id-ID")} icon={Users} tone="primary" />
+          <StatTile label="Amil" value={amilCount.toLocaleString("id-ID")} icon={UserCheck} tone="sky" />
+          <StatTile label="Non-Amil" value={nonAmilCount.toLocaleString("id-ID")} icon={Users} tone="violet" />
+          <StatTile
+            label="Hasil Filter"
+            value={filteredMustahikList.length.toLocaleString("id-ID")}
+            hint="Sesuai pencarian & filter"
+            icon={Filter}
+            tone="amber"
+          />
+        </section>
+
+        <DataTable
+          title="Daftar Mustahik"
+          data={filteredMustahikList}
+          columns={columns}
+          isLoading={isLoading}
+          isReadOnly={isReadOnly}
+          emptyMessage="Belum ada data mustahik"
+          headerActions={
+            <div className="grid w-full gap-2 lg:min-w-[720px] lg:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))_auto]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Cari nama, alamat, RT, gang, asnaf..."
+                  className="h-10 rounded-xl pl-9 text-sm"
                 />
               </div>
 
-              <div className="rounded-2xl border border-border/70 bg-background/85 p-2 shadow-sm">
-                <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                  Gang / Jalur
-                </p>
-                <CreatableSingleSelect
-                  value={laneFilter === "all" ? "" : laneFilter}
-                  onChange={(value) => setLaneFilter(value.trim() ? value : "all")}
-                  options={laneOptions}
-                  placeholder="Semua Gang"
-                  searchPlaceholder="Cari gang / jalur..."
-                  emptyLabel="Gang / jalur tidak ditemukan"
-                  allowCreate={false}
-                />
-              </div>
+              <Select value={asnafFilter} onValueChange={(value) => setAsnafFilter(value as "all" | "amil" | "non_amil")}>
+                <SelectTrigger className="h-10 rounded-xl text-sm">
+                  <SelectValue placeholder="Semua asnaf" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua asnaf</SelectItem>
+                  <SelectItem value="amil">Amil saja</SelectItem>
+                  <SelectItem value="non_amil">Selain amil</SelectItem>
+                </SelectContent>
+              </Select>
 
-              <div className="rounded-2xl border border-border/70 bg-background/85 p-2 shadow-sm">
-                <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                  Urutan Distribusi
-                </p>
+              <CreatableSingleSelect
+                value={rtFilter === "all" ? "" : rtFilter}
+                onChange={(value) => {
+                  setRtFilter(value.trim() ? value : "all");
+                  setLaneFilter("all");
+                }}
+                options={rtOptions}
+                placeholder="Semua RT"
+                searchPlaceholder="Cari RT / wilayah..."
+                emptyLabel="RT / wilayah tidak ditemukan"
+                allowCreate={false}
+              />
+
+              <CreatableSingleSelect
+                value={laneFilter === "all" ? "" : laneFilter}
+                onChange={(value) => setLaneFilter(value.trim() ? value : "all")}
+                options={laneOptions}
+                placeholder="Semua gang"
+                searchPlaceholder="Cari gang / jalur..."
+                emptyLabel="Gang / jalur tidak ditemukan"
+                allowCreate={false}
+              />
+
+              <div className="flex gap-2">
                 <Select value={orderSort} onValueChange={(value) => setOrderSort(value as "asc" | "desc")}>
-                  <SelectTrigger className="h-10 rounded-xl border-0 bg-transparent text-sm shadow-none">
+                  <SelectTrigger className="h-10 w-full rounded-xl text-sm lg:w-[150px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="asc">Urutan Kecil → Besar</SelectItem>
-                    <SelectItem value="desc">Urutan Besar → Kecil</SelectItem>
+                    <SelectItem value="asc">Urutan naik</SelectItem>
+                    <SelectItem value="desc">Urutan turun</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div className="flex items-end">
                 {(searchQuery || asnafFilter !== "all" || rtFilter !== "all" || laneFilter !== "all") && (
                   <Button
                     type="button"
-                    variant="outline"
-                    className="h-11 w-full rounded-2xl text-sm lg:w-auto"
+                    variant="ghost"
+                    className="h-10 shrink-0 rounded-xl text-xs"
                     onClick={() => {
                       setSearchQuery("");
                       setAsnafFilter("all");
@@ -790,31 +777,31 @@ export default function MustahikPage() {
                       setOrderSort("asc");
                     }}
                   >
-                    Reset Semua Filter
+                    Reset
                   </Button>
                 )}
               </div>
             </div>
-          </div>
-        }
-        actions={(mustahik) => (
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" onClick={() => setDetailMustahik(mustahik)}>
-              <Eye className="h-4 w-4" />
-            </Button>
-            {!isReadOnly ? (
-              <>
-                <Button variant="ghost" size="icon" onClick={() => handleEdit(mustahik)}>
-                  <Edit className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="icon" onClick={() => setDeletingMustahik(mustahik)}>
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
-              </>
-            ) : null}
-          </div>
-        )}
-      />
+          }
+          actions={(mustahik) => (
+            <div className="flex items-center gap-0.5">
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDetailMustahik(mustahik)}>
+                <Eye className="h-4 w-4" />
+              </Button>
+              {!isReadOnly ? (
+                <>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(mustahik)}>
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDeletingMustahik(mustahik)}>
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </>
+              ) : null}
+            </div>
+          )}
+        />
+      </div>
 
       <Dialog open={!!detailMustahik} onOpenChange={(open) => !open && setDetailMustahik(null)}>
         <DialogContent className="max-w-2xl">

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { DataTable, Column } from "@/components/shared/DataTable";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { CurrencyInput } from "@/components/shared/CurrencyInput";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -31,8 +33,10 @@ import { formatCurrency } from "@/lib/formatCurrency";
 import {
   Edit,
   Archive,
+  ArchiveRestore,
   Trash2,
   Calendar as CalendarIcon,
+  CalendarRange,
   Eye,
   Wheat,
   Coins,
@@ -62,6 +66,7 @@ export default function Periods() {
   const [viewingPeriod, setViewingPeriod] = useState<Period | null>(null);
   const [formData, setFormData] = useState({
     name: "",
+    status: "active" as "active" | "archived",
     hijri_year: new Date().getFullYear() - 579,
     gregorian_year: new Date().getFullYear(),
     description: "",
@@ -95,6 +100,7 @@ export default function Periods() {
     mutationFn: async (data: typeof formData) => {
       const { error } = await supabase.from("periods").insert({
         name: data.name,
+        status: data.status,
         hijri_year: data.hijri_year,
         gregorian_year: data.gregorian_year,
         description: data.description || null,
@@ -125,6 +131,7 @@ export default function Periods() {
         .from("periods")
         .update({
           name: data.name,
+          status: data.status,
           hijri_year: data.hijri_year,
           gregorian_year: data.gregorian_year,
           description: data.description || null,
@@ -168,6 +175,20 @@ export default function Periods() {
     },
   });
 
+  const restoreMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("periods").update({ status: "active" }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["periods"] });
+      toast({ title: "Periode berhasil diaktifkan kembali" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Gagal", description: error.message });
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("periods").delete().eq("id", id);
@@ -185,6 +206,7 @@ export default function Periods() {
   const resetForm = () => {
     setFormData({
       name: "",
+      status: "active",
       hijri_year: new Date().getFullYear() - 579,
       gregorian_year: new Date().getFullYear(),
       description: "",
@@ -202,6 +224,7 @@ export default function Periods() {
     setEditingPeriod(period);
     setFormData({
       name: period.name,
+      status: period.status === "archived" ? "archived" : "active",
       hijri_year: period.hijri_year,
       gregorian_year: period.gregorian_year,
       description: period.description || "",
@@ -236,7 +259,14 @@ export default function Periods() {
       key: "status",
       header: "Status",
       render: (p) => (
-        <Badge variant={p.status === "active" ? "default" : "secondary"}>
+        <Badge
+          variant="outline"
+          className={
+            p.status === "active"
+              ? "rounded-full border-emerald-300 bg-emerald-50 text-emerald-700"
+              : "rounded-full border-amber-300 bg-amber-50 text-amber-700"
+          }
+        >
           {p.status === "active" ? "Aktif" : "Arsip"}
         </Badge>
       ),
@@ -264,14 +294,39 @@ export default function Periods() {
     }));
   };
 
+  const activePeriodCount = periods.filter((period) => period.status === "active").length;
+
   return (
     <AppLayout title="Manajemen Periode">
-      {!canManage && (
-        <div className="mb-4 p-3 bg-muted rounded-lg text-sm text-muted-foreground">
-          Anda hanya memiliki akses untuk melihat daftar periode. Untuk mengelola periode, hubungi Administrator.
-        </div>
-      )}
-      <DataTable
+      <div className="space-y-4">
+        <PageHeader
+          title="Manajemen Periode"
+          description="Atur periode zakat beserta acuan beras, uang, fidyah, dan nisab."
+          icon={CalendarRange}
+          badges={
+            <>
+              <Badge variant="outline" className="rounded-full tabular-nums">
+                {periods.length} periode
+              </Badge>
+              <Badge variant="outline" className="rounded-full border-emerald-300 bg-emerald-50 text-emerald-700 tabular-nums">
+                {activePeriodCount} aktif
+              </Badge>
+              {!canManage && (
+                <Badge variant="outline" className="rounded-full border-amber-300 bg-amber-50 text-amber-700">
+                  Hanya lihat
+                </Badge>
+              )}
+            </>
+          }
+        />
+
+        {!canManage && (
+          <div className="rounded-2xl border border-amber-200/70 bg-amber-50/70 p-3 text-sm text-amber-900">
+            Anda hanya memiliki akses untuk melihat daftar periode. Untuk mengelola periode, hubungi Administrator.
+          </div>
+        )}
+
+        <DataTable
         title="Daftar Periode"
         data={periods}
         columns={columns}
@@ -282,46 +337,67 @@ export default function Periods() {
         searchPlaceholder="Cari periode..."
         emptyMessage="Belum ada periode"
         actions={(period) => (
-          <div className="flex gap-1">
+          <div className="flex items-center gap-0.5">
             <Button
               variant="ghost"
               size="icon"
+              className="h-8 w-8"
               onClick={() => setViewingPeriod(period)}
               title="Lihat detail periode"
             >
               <Eye className="h-4 w-4" />
             </Button>
-            {canManage && period.status === "active" && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleEdit(period)}
-                >
-                  <Edit className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => archiveMutation.mutate(period.id)}
-                >
-                  <Archive className="h-4 w-4" />
-                </Button>
-              </>
-            )}
-            {canManage && period.status === "active" && hasRole("super_admin") && (
+            {canManage && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="text-destructive"
+                className="h-8 w-8"
+                onClick={() => handleEdit(period)}
+                title="Edit periode"
+              >
+                <Edit className="h-4 w-4" />
+              </Button>
+            )}
+            {canManage &&
+              (period.status === "active" ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => archiveMutation.mutate(period.id)}
+                  disabled={archiveMutation.isPending}
+                  title="Arsipkan periode"
+                >
+                  <Archive className="h-4 w-4" />
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-emerald-600 hover:text-emerald-700"
+                  onClick={() => restoreMutation.mutate(period.id)}
+                  disabled={restoreMutation.isPending}
+                  title="Aktifkan kembali periode"
+                >
+                  <ArchiveRestore className="h-4 w-4" />
+                </Button>
+              ))}
+            {canManage && hasRole("super_admin") && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive"
                 onClick={() => deleteMutation.mutate(period.id)}
+                disabled={deleteMutation.isPending}
+                title="Hapus periode"
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
             )}
           </div>
         )}
-      />
+        />
+      </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent>
@@ -484,6 +560,46 @@ export default function Periods() {
                   />
                 </div>
               </div>
+            </div>
+
+            <div className="rounded-xl border border-border/70 bg-muted/25 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <Label htmlFor="period-status" className="text-sm">
+                    Status periode
+                  </Label>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    {formData.status === "active"
+                      ? "Aktif: transaksi masih bisa dicatat dan diubah."
+                      : "Arsip: periode dikunci, seluruh menu jadi mode baca saja."}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Badge
+                    variant="outline"
+                    className={
+                      formData.status === "active"
+                        ? "rounded-full border-emerald-300 bg-emerald-50 text-emerald-700"
+                        : "rounded-full border-amber-300 bg-amber-50 text-amber-700"
+                    }
+                  >
+                    {formData.status === "active" ? "Aktif" : "Arsip"}
+                  </Badge>
+                  <Switch
+                    id="period-status"
+                    checked={formData.status === "active"}
+                    onCheckedChange={(checked) =>
+                      setFormData({ ...formData, status: checked ? "active" : "archived" })
+                    }
+                  />
+                </div>
+              </div>
+              {formData.status === "active" && activePeriodCount > 0 && editingPeriod?.status !== "active" && (
+                <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
+                  Sudah ada {activePeriodCount} periode aktif. Periode dengan tahun terbaru yang akan dipakai sebagai
+                  periode utama di dashboard dan papan /tv.
+                </p>
+              )}
             </div>
 
             <div className="flex justify-end gap-2">
