@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import {
   Dialog,
   DialogContent,
@@ -547,9 +548,8 @@ export default function AdminMembers() {
 
             <div className="space-y-2">
               <Label htmlFor="password">Password *</Label>
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 placeholder="Minimal 6 karakter"
                 value={newUserPassword}
                 onChange={(e) => setNewUserPassword(e.target.value)}

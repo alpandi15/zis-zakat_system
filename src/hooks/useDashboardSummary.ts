@@ -37,6 +37,14 @@ export interface DashboardSummary {
     firstReceiptAt: string | null;
     latestReceiptAt: string | null;
   };
+
+  service?: {
+    isOpen: boolean;
+    openedAt: string | null;
+    scheduledCloseAt: string | null;
+    note: string | null;
+    lastClosedAt: string | null;
+  };
 }
 
 export function useDashboardSummary() {

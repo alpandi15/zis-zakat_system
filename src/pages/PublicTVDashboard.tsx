@@ -4,6 +4,8 @@ import {
   Activity,
   Banknote,
   Calendar,
+  DoorClosed,
+  DoorOpen,
   HandCoins,
   Maximize2,
   Minimize2,
@@ -44,6 +46,13 @@ const formatWeight = (value: number): string =>
 
 const formatCount = (value: number): string =>
   new Intl.NumberFormat("id-ID").format(Math.round(value));
+
+const formatClock = (value: string | null): string => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+};
 
 const formatDateTime = (value: string | null): string => {
   if (!value) return "-";
@@ -262,6 +271,14 @@ export default function PublicTVDashboard() {
         firstReceiptAt: data.receiptWindow.firstReceiptAt,
         latestReceiptAt: data.receiptWindow.latestReceiptAt,
       },
+
+      service: {
+        isOpen: Boolean(data.service?.isOpen),
+        openedAt: data.service?.openedAt ?? null,
+        scheduledCloseAt: data.service?.scheduledCloseAt ?? null,
+        note: data.service?.note ?? null,
+        lastClosedAt: data.service?.lastClosedAt ?? null,
+      },
     };
   }, [data]);
 
@@ -418,6 +435,80 @@ export default function PublicTVDashboard() {
             </div>
           </div>
         </header>
+
+        {/* Status layanan */}
+        <section
+          style={{ animationDelay: "40ms" }}
+          className={`relative flex flex-col gap-3 overflow-hidden rounded-3xl border px-4 py-3 opacity-0 backdrop-blur-xl animate-rise motion-reduce:animate-none motion-reduce:opacity-100 sm:flex-row sm:items-center sm:justify-between md:px-6 md:py-4 ${
+            mappedData.service.isOpen
+              ? "border-emerald-400/40 bg-emerald-400/[0.10]"
+              : "border-rose-400/30 bg-rose-400/[0.07]"
+          }`}
+        >
+          <div
+            className={`pointer-events-none absolute -left-16 -top-20 h-52 w-52 rounded-full blur-3xl ${
+              mappedData.service.isOpen ? "bg-emerald-400/25" : "bg-rose-400/20"
+            }`}
+          />
+
+          <div className="relative flex items-center gap-3 md:gap-4">
+            <div
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl md:h-16 md:w-16 ${
+                mappedData.service.isOpen ? "bg-emerald-400/20 text-emerald-300" : "bg-rose-400/15 text-rose-300"
+              }`}
+            >
+              {mappedData.service.isOpen ? (
+                <DoorOpen className="h-6 w-6 md:h-8 md:w-8" />
+              ) : (
+                <DoorClosed className="h-6 w-6 md:h-8 md:w-8" />
+              )}
+            </div>
+
+            <div className="min-w-0">
+              <p
+                className={`text-2xl font-semibold tracking-tight md:text-4xl ${
+                  mappedData.service.isOpen ? "text-emerald-300" : "text-rose-300"
+                }`}
+              >
+                {mappedData.service.isOpen ? "SEDANG BUKA" : "SEDANG TUTUP"}
+              </p>
+              <p className="mt-0.5 text-[11px] text-slate-300 md:text-sm">
+                {mappedData.service.isOpen
+                  ? mappedData.service.scheduledCloseAt
+                    ? `Melayani ${formatClock(mappedData.service.openedAt)} s/d ${formatClock(mappedData.service.scheduledCloseAt)}`
+                    : `Melayani sejak ${formatClock(mappedData.service.openedAt)}`
+                  : mappedData.service.lastClosedAt
+                    ? `Layanan terakhir ditutup ${formatClock(mappedData.service.lastClosedAt)}`
+                    : "Loket zakat belum dibuka"}
+              </p>
+              {mappedData.service.isOpen && mappedData.service.note && (
+                <p className="mt-0.5 truncate text-[11px] text-emerald-200/80 md:text-sm">
+                  {mappedData.service.note}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <span
+            className={`relative inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] md:text-xs ${
+              mappedData.service.isOpen
+                ? "border-emerald-400/40 bg-emerald-400/15 text-emerald-200"
+                : "border-rose-400/30 bg-rose-400/10 text-rose-200"
+            }`}
+          >
+            <span className="relative flex h-2 w-2">
+              {mappedData.service.isOpen && (
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 animate-glow-pulse" />
+              )}
+              <span
+                className={`relative inline-flex h-2 w-2 rounded-full ${
+                  mappedData.service.isOpen ? "bg-emerald-300" : "bg-rose-400"
+                }`}
+              />
+            </span>
+            {mappedData.service.isOpen ? "Loket melayani" : "Loket tutup"}
+          </span>
+        </section>
 
         {/* KPI utama */}
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">

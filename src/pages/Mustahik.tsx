@@ -48,6 +48,7 @@ import {
   Eye,
   Filter,
   HeartHandshake,
+  ListOrdered,
   MapPin,
   Plus,
   Route,
@@ -163,6 +164,13 @@ const compareNullableNumber = (a: number | null | undefined, b: number | null | 
     });
   };
 
+/**
+ * Nomor urut ditulis sebagai kelipatan 10 supaya masih ada ruang menyisipkan
+ * mustahik baru di tengah tanpa menomori ulang seluruh daftar. Kolomnya bertipe
+ * integer, jadi nilai pecahan seperti 3.1 akan dibulatkan diam-diam oleh basis data.
+ */
+const ORDER_STEP = 10;
+
 export default function MustahikPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [detailMustahik, setDetailMustahik] = useState<Mustahik | null>(null);
@@ -174,6 +182,7 @@ export default function MustahikPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [orderSort, setOrderSort] = useState<"asc" | "desc">("asc");
   const [isRouteFieldsAvailable, setIsRouteFieldsAvailable] = useState(true);
+  const [isRenumbering, setIsRenumbering] = useState(false);
   const [formData, setFormData] = useState<MustahikFormData>({
     name: "",
     address: "",
@@ -477,6 +486,50 @@ export default function MustahikPage() {
     ).sort(routeCollator.compare);
   }, [formData.distribution_rt, mustahikList]);
 
+  /** Nomor urut yang disarankan untuk grup RT + gang yang sedang dipilih di form. */
+  const suggestedDeliveryOrder = useMemo(() => {
+    const rt = formData.distribution_rt.trim();
+    const lane = formData.distribution_lane.trim();
+
+    const groupOrders = mustahikList
+      .filter(
+        (item) =>
+          item.id !== editingMustahik?.id &&
+          (item.distribution_rt?.trim() || "") === rt &&
+          (item.distribution_lane?.trim() || "") === lane &&
+          typeof item.delivery_order === "number",
+      )
+      .map((item) => item.delivery_order as number);
+
+    if (groupOrders.length === 0) return ORDER_STEP;
+    return Math.max(...groupOrders) + ORDER_STEP;
+  }, [formData.distribution_rt, formData.distribution_lane, mustahikList, editingMustahik?.id]);
+
+  /** Mustahik lain pada grup yang sama dengan nomor urut identik. */
+  const duplicateOrderName = useMemo(() => {
+    const parsed = Number(formData.delivery_order);
+    if (!formData.delivery_order || !Number.isFinite(parsed)) return null;
+
+    const rt = formData.distribution_rt.trim();
+    const lane = formData.distribution_lane.trim();
+
+    const clash = mustahikList.find(
+      (item) =>
+        item.id !== editingMustahik?.id &&
+        (item.distribution_rt?.trim() || "") === rt &&
+        (item.distribution_lane?.trim() || "") === lane &&
+        item.delivery_order === Math.round(parsed),
+    );
+
+    return clash?.name || null;
+  }, [
+    formData.delivery_order,
+    formData.distribution_rt,
+    formData.distribution_lane,
+    mustahikList,
+    editingMustahik?.id,
+  ]);
+
   const filteredMustahikList = useMemo(() => {
     const filtered = mustahikList.filter((item) => {
       const passesAsnaf =
@@ -516,6 +569,65 @@ export default function MustahikPage() {
     () => mustahikList.filter((item) => item.asnaf_settings?.asnaf_code !== "amil").length,
     [mustahikList],
   );
+
+  /**
+   * Menulis ulang nomor urut daftar yang sedang tampil menjadi kelipatan 10,
+   * dihitung terpisah untuk tiap grup RT + gang dan mengikuti urutan di layar.
+   */
+  const handleRenumberOrder = async () => {
+    const targets = filteredMustahikList;
+    if (targets.length === 0) return;
+
+    const counterPerGroup = new Map<string, number>();
+    const updates: { id: string; delivery_order: number }[] = [];
+
+    // Selalu dihitung menaik supaya hasilnya tidak terbalik saat filter diurutkan turun.
+    const ascending = orderSort === "asc" ? targets : [...targets].reverse();
+
+    ascending.forEach((item) => {
+      const groupKey = `${item.distribution_rt?.trim() || ""}|${item.distribution_lane?.trim() || ""}`;
+      const nextOrder = (counterPerGroup.get(groupKey) || 0) + ORDER_STEP;
+      counterPerGroup.set(groupKey, nextOrder);
+
+      if (item.delivery_order !== nextOrder) {
+        updates.push({ id: item.id, delivery_order: nextOrder });
+      }
+    });
+
+    if (updates.length === 0) {
+      toast({ title: "Nomor urut sudah rapi", description: "Tidak ada perubahan yang perlu disimpan." });
+      return;
+    }
+
+    setIsRenumbering(true);
+    try {
+      const BATCH_SIZE = 10;
+      for (let index = 0; index < updates.length; index += BATCH_SIZE) {
+        const results = await Promise.all(
+          updates.slice(index, index + BATCH_SIZE).map((update) =>
+            supabase.from("mustahik").update({ delivery_order: update.delivery_order }).eq("id", update.id),
+          ),
+        );
+
+        const failed = results.find((result) => result.error);
+        if (failed?.error) throw failed.error;
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["mustahik"] });
+      toast({
+        title: "Nomor urut dirapikan",
+        description: `${updates.length} mustahik ditulis ulang menjadi kelipatan ${ORDER_STEP}.`,
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Gagal merapikan nomor urut",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan tidak terduga",
+      });
+    } finally {
+      setIsRenumbering(false);
+    }
+  };
 
   const handleExportPDF = () => {
     if (filteredMustahikList.length === 0) {
@@ -764,6 +876,19 @@ export default function MustahikPage() {
                     <SelectItem value="desc">Urutan turun</SelectItem>
                   </SelectContent>
                 </Select>
+                {!isReadOnly && isRouteFieldsAvailable && filteredMustahikList.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 shrink-0 gap-1.5 rounded-xl text-xs"
+                    disabled={isRenumbering}
+                    onClick={() => void handleRenumberOrder()}
+                    title={`Tulis ulang nomor urut daftar ini menjadi kelipatan ${ORDER_STEP} per RT/gang`}
+                  >
+                    <ListOrdered className="h-3.5 w-3.5" />
+                    {isRenumbering ? "Merapikan..." : "Rapikan urutan"}
+                  </Button>
+                )}
                 {(searchQuery || asnafFilter !== "all" || rtFilter !== "all" || laneFilter !== "all") && (
                   <Button
                     type="button"
@@ -978,20 +1103,55 @@ export default function MustahikPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="delivery_order">Urutan Distribusi</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="delivery_order">Urutan Distribusi</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 rounded-lg px-2 text-[11px]"
+                    onClick={() => setFormData({ ...formData, delivery_order: String(suggestedDeliveryOrder) })}
+                  >
+                    Pakai {suggestedDeliveryOrder}
+                  </Button>
+                </div>
                 <Input
                   id="delivery_order"
                   type="number"
+                  inputMode="numeric"
                   min={1}
+                  step={1}
                   value={formData.delivery_order}
-                  onChange={(event) => setFormData({ ...formData, delivery_order: event.target.value })}
-                  placeholder="Contoh: 1"
+                  onChange={(event) => {
+                    // Kolomnya integer; pecahan akan dibulatkan diam-diam oleh basis data.
+                    const digitsOnly = event.target.value.replace(/[^0-9]/g, "");
+                    setFormData({ ...formData, delivery_order: digitsOnly });
+                  }}
+                  placeholder={`Contoh: ${ORDER_STEP}`}
                 />
+                {duplicateOrderName ? (
+                  <p className="text-[11px] text-amber-700">
+                    Nomor ini sudah dipakai {duplicateOrderName} pada RT/gang yang sama. Keduanya akan diurutkan
+                    berdasarkan nama.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    Gunakan kelipatan {ORDER_STEP} (10, 20, 30, ...) agar masih ada ruang menyisipkan di tengah.
+                  </p>
+                )}
               </div>
 
               <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground md:col-span-2">
-                Data ini dipakai untuk pengurutan lapangan: sistem akan mengurutkan berdasarkan RT, lalu Gang/Jalur,
-                lalu Urutan Distribusi.
+                <p>
+                  Data ini dipakai untuk pengurutan lapangan: sistem mengurutkan berdasarkan RT, lalu Gang/Jalur, lalu
+                  Urutan Distribusi.
+                </p>
+                <p className="mt-1.5 text-xs">
+                  Nomor urut hanya menerima bilangan bulat. Untuk menyisipkan di antara 30 dan 40, isi
+                  {" "}
+                  <span className="font-medium text-foreground">35</span> — bukan 3.1, karena angka pecahan akan
+                  dibulatkan oleh sistem.
+                </p>
               </div>
             </div>
 

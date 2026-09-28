@@ -818,6 +818,42 @@ export type Database = {
         }
         Relationships: []
       }
+      service_sessions: {
+        Row: {
+          id: string
+          opened_at: string
+          scheduled_close_at: string | null
+          closed_at: string | null
+          note: string | null
+          opened_by: string | null
+          closed_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          opened_at?: string
+          scheduled_close_at?: string | null
+          closed_at?: string | null
+          note?: string | null
+          opened_by?: string | null
+          closed_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          opened_at?: string
+          scheduled_close_at?: string | null
+          closed_at?: string | null
+          note?: string | null
+          opened_by?: string | null
+          closed_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -1309,6 +1345,14 @@ export type Database = {
       }
       public_dashboard_summary: {
         Args: Record<string, never>
+        Returns: Json
+      }
+      export_all_data: {
+        Args: Record<string, never>
+        Returns: Json
+      }
+      reset_all_data: {
+        Args: { _scope?: string }
         Returns: Json
       }
     }

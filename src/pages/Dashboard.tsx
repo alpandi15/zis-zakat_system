@@ -10,6 +10,7 @@ import { usePeriodSummary, useZakatVsFidyahComparison } from "@/hooks/useDashboa
 import { useTvViewerPresence } from "@/hooks/useTvViewerPresence";
 import { PeriodSelector } from "@/components/dashboard/PeriodSelector";
 import { FundComparisonChart } from "@/components/dashboard/FundComparisonChart";
+import { ServiceStatusCard } from "@/components/dashboard/ServiceStatusCard";
 import { formatCurrency, formatWeight } from "@/lib/exportUtils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -148,7 +149,7 @@ function ProgressRow({
 
 export default function Dashboard() {
   const { isAdmin } = useAuth();
-  const { periods, selectedPeriod, setSelectedPeriodId, isLoading: periodsLoading } = usePeriod();
+  const { periods, selectedPeriod, setSelectedPeriodId, isLoading: periodsLoading, isReadOnly } = usePeriod();
   const isAdminUser = isAdmin();
   const periodId = selectedPeriod?.id || null;
 
@@ -527,8 +528,10 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Aksi cepat + acuan */}
+          {/* Status layanan + aksi cepat + acuan */}
           <div className="grid gap-3">
+            <ServiceStatusCard isReadOnly={isReadOnly} />
+
             <Card
               style={{ animationDelay: "360ms" }}
               className="border-border/70 opacity-0 shadow-sm animate-rise motion-reduce:animate-none motion-reduce:opacity-100"

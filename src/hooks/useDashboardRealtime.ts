@@ -33,6 +33,11 @@ export function useDashboardRealtime(p0: () => void) {
         { event: "*", schema: "public", table: "fidyah_distributions" },
         () => queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "service_sessions" },
+        () => queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
+      )
       .subscribe();
 
     return () => {

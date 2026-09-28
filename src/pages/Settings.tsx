@@ -1,6 +1,7 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { useAuth } from "@/hooks/useAuth";
+import { DataBackupCard } from "@/components/settings/DataBackupCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MASJID_ADDRESS, MASJID_NAME } from "@/lib/masjidProfile";
@@ -19,6 +20,8 @@ const ROLE_LABELS: Record<string, string> = {
 export default function Settings() {
   const { profile, roles } = useAuth();
   const initial = profile?.full_name?.charAt(0)?.toUpperCase() || "U";
+  // Cadangan dan reset dibatasi ke super admin murni, sesuai pemeriksaan di sisi database.
+  const isSuperAdmin = roles.includes("super_admin");
 
   return (
     <AppLayout title="Pengaturan">
@@ -74,6 +77,8 @@ export default function Settings() {
               )}
             </CardContent>
           </Card>
+
+          {isSuperAdmin && <DataBackupCard authorEmail={profile?.email} />}
 
           <Card className="border-border/70 lg:col-span-2">
             <CardHeader className="pb-3">
