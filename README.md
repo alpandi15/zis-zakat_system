@@ -1,182 +1,297 @@
-# 🕌 Zakat Fitrah Management App (Open Source)
+# 🕌 AmanahZIS — Aplikasi Manajemen Zakat & Fidyah
 
-Aplikasi ini adalah platform operasional untuk pengelolaan **Zakat Fitrah** di masjid atau organisasi keislaman.
+Platform operasional **open source** untuk panitia zakat (amil) di masjid dan organisasi keislaman.
+Mengelola penerimaan zakat fitrah, zakat mal, dan fidyah — sampai perhitungan porsi, penyaluran ke
+mustahik, laporan, dan papan informasi publik.
 
-Dirancang untuk membantu panitia (amil) dalam:
-- Pendataan muzakki & mustahik
-- Pengelolaan distribusi zakat
-- Monitoring dan pelaporan
-- Operasional zakat secara digital & transparan
+> 🆓 Gratis dan terbuka · 🚫 Dilarang diperjualbelikan · 🤝 Silakan dikembangkan bersama
 
 ---
 
-## ⚠️ Disclaimer & Ketentuan Penggunaan
+## ✨ Fitur Utama
 
-> ❗ **PENTING — HARAP DIBACA SEBELUM MENGGUNAKAN**
-
-Aplikasi ini:
-
-✅ **GRATIS & OPEN SOURCE**  
-✅ **Dibuat khusus untuk kebutuhan masjid / organisasi zakat**  
-
-Namun:
-
-🚫 **TIDAK BOLEH DIGUNAKAN UNTUK TUJUAN KOMERSIAL**  
-🚫 **DILARANG KERAS DIPERJUALBELIKAN DALAM BENTUK APAPUN**  
-
----
-
-## 🎯 Tujuan Penggunaan
-
-Aplikasi ini **hanya diperuntukkan untuk:**
-- Panitia zakat (amil)
-- Masjid
-- Organisasi sosial / keislaman
+| Modul | Keterangan |
+|---|---|
+| 📊 **Dashboard** | Ringkasan penerimaan, progres penyaluran, aktivitas terbaru, dan status layanan |
+| 🌾 **Zakat Fitrah** | Pencatatan beras maupun uang, per anggota keluarga atau per jumlah jiwa |
+| 💰 **Zakat Mal** | Penghasilan, emas, dan perdagangan dengan acuan nisab per periode |
+| 🍚 **Fidyah** | Pengganti puasa dalam bentuk uang atau makanan |
+| 🧮 **Perhitungan** | Porsi amil (persentase tetap atau rasio × faktor), estimasi paket pembungkusan, kunci batch |
+| 📦 **Pendistribusian** | Penyaluran per batch terkunci atau manual per kategori, plus penugasan pengiriman |
+| 👥 **Data Master** | Muzakki beserta anggota keluarga, mustahik dengan rute distribusi, pengaturan asnaf |
+| 📑 **Laporan** | Ekspor PDF dan Excel siap cetak |
+| 📡 **Live Monitoring** | Papan publik `/tv` untuk layar masjid, tanpa perlu login |
+| 🔐 **Hak Akses** | Peran super admin, ketua, sekretaris, bendahara, petugas, dan pengamat |
+| 💾 **Cadangan & Reset** | Unduh seluruh data sebagai berkas `.sql`, dan reset data untuk memulai periode baru |
 
 ---
 
-## 🤝 Kolaborasi & Pengembangan
+## 🧰 Teknologi
 
-Silakan:
-- Menggunakan aplikasi ini untuk kebutuhan internal
-- Memodifikasi sesuai kebutuhan organisasi / masjid
-- Berkontribusi untuk pengembangan fitur
-
-💡 **Sangat disarankan untuk berkolaborasi** agar:
-- Fitur semakin lengkap
-- Sistem semakin stabil
-- Bisa menjadi solusi zakat yang lebih baik untuk banyak masjid
+- **Next.js 16** (Pages Router) + **React 18** + **TypeScript**
+- **Tailwind CSS** + **shadcn/ui**
+- **Supabase** (PostgreSQL, Auth, Row Level Security, Realtime, Edge Functions)
+- **TanStack Query**, **Recharts**, **jsPDF**, **SheetJS**
 
 ---
 
-## 🚀 Supabase Bootstrap Admin
+## 🚀 Panduan Pemasangan
 
-Setelah migration dijalankan, akun admin bootstrap otomatis dibuat jika belum ada `super_admin`:
+Setiap pemasangan memakai **proyek Supabase miliknya sendiri**. Tidak ada kunci atau ID proyek
+siapa pun di dalam repositori ini.
 
-- Email: `admin@zakatku.local`
-- Password: `Admin123!`
+### Prasyarat
 
-Command:
+- **Node.js 20** atau lebih baru, beserta npm
+- Akun **[Supabase](https://supabase.com)** (paket gratis sudah cukup)
+- **Supabase CLI** — dipakai lewat `npx`, tidak perlu dipasang global
+
+### 1. Clone dan pasang dependensi
+
+```sh
+git clone https://github.com/<akun-anda>/<nama-repo>.git
+cd <nama-repo>
+npm install
+```
+
+### 2. Buat proyek Supabase
+
+1. Masuk ke [supabase.com/dashboard](https://supabase.com/dashboard) lalu **New project**.
+2. Isi nama proyek, **simpan baik-baik database password** yang Anda buat — nanti dipakai saat
+   menjalankan migrasi.
+3. Pilih region terdekat, misalnya Singapore untuk pengguna di Indonesia.
+4. Tunggu sampai proyek selesai disiapkan.
+
+### 3. Siapkan berkas `.env`
+
+Salin contoh yang tersedia:
+
+```sh
+cp .env.example .env
+```
+
+Lalu isi dari dashboard Supabase:
+
+| Variabel | Lokasi di dashboard Supabase |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | **Project Settings → Data API → Project URL** |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | **Project Settings → API Keys → publishable / anon key** |
+| `NEXT_PUBLIC_MASJID_NAME` | Nama masjid Anda, tampil di kop laporan dan papan `/tv` |
+| `NEXT_PUBLIC_MASJID_ADDRESS` | Alamat masjid Anda |
+
+> ⚠️ Gunakan **publishable / anon key**, bukan `service_role`. Variabel berawalan `NEXT_PUBLIC_`
+> ikut terkirim ke browser. Berkas `.env` sudah diabaikan Git sehingga tidak akan ter-commit.
+
+### 4. Jalankan migrasi database
+
+Ambil **project ref** Anda dari URL dashboard
+(`https://supabase.com/dashboard/project/`**`<project-ref>`**), lalu:
 
 ```sh
 npx supabase login
-npx supabase link --project-ref gezamfqxzdouqfbsqjgv
+npx supabase link --project-ref <project-ref-anda>
 npx supabase db push
 ```
 
-Setelah login pertama, ganti password akun admin dari Supabase Auth/User Management.
+Perintah terakhir akan meminta database password dari langkah 2. Seluruh tabel, kebijakan RLS,
+fungsi, dan trigger akan terpasang.
 
-Jika muncul error login:
-`{"code":"unexpected_failure","message":"Database error querying schema"}`
-jalankan lagi:
+### 5. Buat akun super admin pertama
 
-```sh
-npx supabase db push
+Repositori ini **tidak memuat kredensial bawaan**. Pilih salah satu cara:
+
+<details>
+<summary><b>Cara A — lewat dashboard (disarankan)</b></summary>
+
+1. Buka **Authentication → Users → Add user**, isi email dan password Anda sendiri,
+   centang *Auto Confirm User*.
+2. Buka **SQL Editor**, jalankan:
+
+   ```sql
+   insert into public.user_roles (user_id, role)
+   select id, 'super_admin'::public.app_role
+   from auth.users
+   where email = 'email-anda@contoh.com'
+   on conflict do nothing;
+   ```
+
+</details>
+
+<details>
+<summary><b>Cara B — lewat SQL Editor sekaligus</b></summary>
+
+Jalankan di **SQL Editor**, ganti nilainya dengan milik Anda:
+
+```sql
+select set_config('zakatku.bootstrap_admin_email', 'email-anda@contoh.com', false);
+select set_config('zakatku.bootstrap_admin_password', 'PasswordKuatAnda', false);
+select set_config('zakatku.bootstrap_admin_name', 'Nama Anda', false);
 ```
 
-Karena ada migration perbaikan auth bootstrap yang akan menyinkronkan kolom `auth.users` dan `auth.identities`.
+Lalu salin isi `supabase/migrations/20260311143000_seed_bootstrap_super_admin.sql` ke editor yang
+sama dan jalankan. Akun akan dibuat beserta peran `super_admin`.
 
-## Supabase migration ops (rollback/reset)
+</details>
 
-Peringatan: command di bawah bersifat destruktif jika pakai `--linked` (remote project).
-
-Backup dulu sebelum rollback/reset:
+### 6. Jalankan aplikasi
 
 ```sh
+npm run dev
+```
+
+Buka [http://localhost:3000](http://localhost:3000) dan login dengan akun dari langkah 5.
+
+### 7. Konfigurasi awal di dalam aplikasi
+
+1. **Periode** → buat periode zakat (mis. *Ramadhan 1447 H*) dan isi acuan: beras per jiwa,
+   uang per jiwa, tarif fidyah harian, serta harga emas untuk nisab.
+2. **Pengaturan → Asnaf** → sesuaikan golongan penerima dan persentase amil.
+3. **Mustahik** → masukkan data penerima beserta RT/gang dan nomor urut distribusi.
+4. **Admin → Pengguna** → tambahkan akun panitia lain sesuai perannya.
+
+---
+
+## ☁️ Deploy ke Produksi
+
+Aplikasi ini berjalan baik di Vercel, Netlify, atau VPS mana pun yang mendukung Next.js.
+
+```sh
+npm run build
+npm run start
+```
+
+Daftarkan variabel lingkungan yang sama seperti pada `.env` di panel environment variables milik
+penyedia hosting Anda.
+
+---
+
+## 💾 Cadangan & Pemulihan Data
+
+Menu **Pengaturan → Cadangan & reset data** (khusus super admin) menyediakan:
+
+- **Unduh Backup SQL** — seluruh isi tabel sebagai berkas `.sql` berisi perintah `INSERT`.
+- **Reset Data** — mengosongkan data transaksi, atau sekaligus data master, dengan konfirmasi ganda.
+  Akun login dan pengaturan asnaf tidak pernah ikut terhapus.
+
+Memulihkan dari berkas cadangan: buka **SQL Editor**, tempel seluruh isi berkas `.sql`, jalankan.
+Berkas memakai `ON CONFLICT DO NOTHING` sehingga aman dijalankan berulang kali.
+
+---
+
+## 🛠️ Operasional Migrasi Supabase
+
+```sh
+# Bandingkan migrasi lokal dengan remote
+npx supabase migration list --linked
+
+# Terapkan migrasi yang belum masuk
+npx supabase db push
+
+# Cadangan penuh sebelum tindakan berisiko
 npx supabase db dump --linked -f backup_full.sql
 npx supabase db dump --linked --role-only -f backup_roles.sql
-```
 
-Cek status migration local vs remote:
-
-```sh
-npx supabase migration list --linked
-```
-
-Rollback migration terakhir di remote:
-
-```sh
+# Batalkan satu migrasi terakhir di remote
 npx supabase migration down --linked --last 1 --yes
 ```
 
-Rollback beberapa migration di remote (contoh 2):
+> ⚠️ `npx supabase db reset --linked` **menghapus seluruh isi database remote**, termasuk akun
+> pengguna. Selalu buat cadangan terlebih dahulu.
 
-```sh
-npx supabase migration down --linked --last 2 --yes
+Bila aplikasi melaporkan tabel tidak ditemukan padahal migrasi sudah dijalankan, segarkan cache
+PostgREST lewat SQL Editor:
+
+```sql
+notify pgrst, 'reload schema';
 ```
-
-Apply ulang migration setelah rollback:
-
-```sh
-npx supabase db push --linked --yes
-```
-
-Reset total remote DB (hapus semua data termasuk auth/users, lalu apply ulang migration):
-
-```sh
-npx supabase db reset --linked --yes
-```
-
-Untuk local DB:
-
-```sh
-npx supabase start
-npx supabase db reset --local
-```
-
-## Project info
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## 📸 Tampilan Aplikasi
-
-Berikut adalah beberapa tampilan utama dari aplikasi Zakat Fitrah Management:
 
 ---
+
+## 📸 Tampilan Aplikasi
 
 ### 🏠 Dashboard
 <img src="docs/screenshots/dashboard.png" width="700"/>
 
----
-
-### ➕ Input / Create Fitrah
+### ➕ Input Zakat Fitrah
 <img src="docs/screenshots/create-fitrah.png" width="700"/>
-
----
 
 ### 🧾 Data Muzakki / Fitrah
 <img src="docs/screenshots/fitrah.png" width="700"/>
 
----
-
 ### 🍚 Fidyah
 <img src="docs/screenshots/fidyah.png" width="700"/>
-
----
 
 ### 👥 Data Mustahik
 <img src="docs/screenshots/mustahik.png" width="700"/>
 
----
-
 ### 🧮 Perhitungan Zakat
 <img src="docs/screenshots/perhitungan.png" width="700"/>
-
-
----
 
 ### 📅 Periode Zakat
 <img src="docs/screenshots/periode.png" width="700"/>
 
----
-
 ### 📡 Live Monitoring
 <img src="docs/screenshots/live-monitoring.png" width="700"/>
+
+---
+
+## ⚠️ Ketentuan Penggunaan
+
+Aplikasi ini **gratis dan open source**, dibuat khusus untuk kebutuhan masjid dan organisasi zakat.
+
+**Diperbolehkan:**
+- Dipakai untuk operasional masjid, panitia zakat (amil), dan organisasi sosial keislaman
+- Dimodifikasi sesuai kebutuhan lembaga
+- Dikembangkan dan dikontribusikan kembali
+
+**Tidak diperbolehkan:**
+- 🚫 Digunakan untuk tujuan komersial
+- 🚫 Diperjualbelikan dalam bentuk apa pun
+
+Aplikasi disediakan apa adanya tanpa jaminan. Keakuratan perhitungan dan kesesuaiannya dengan
+ketentuan syariat tetap menjadi tanggung jawab panitia yang menggunakan. Mohon diverifikasi
+bersama pembina atau ustadz setempat.
+
+---
+
+## 🤝 Kontribusi
+
+Kontribusi sangat terbuka — perbaikan bug, fitur baru, maupun penyempurnaan dokumentasi.
+
+1. Fork repositori ini
+2. Buat branch fitur: `git checkout -b fitur/nama-fitur`
+3. Pastikan lolos pemeriksaan: `npm run lint` dan `npm run build`
+4. Commit, push, lalu buka Pull Request
+
+Menemukan masalah atau punya usulan? Silakan buka **Issue**.
+
+---
+
+## ☕ Dukung Pengembangan
+
+Aplikasi ini dikerjakan di waktu luang dan dibagikan gratis untuk masjid mana pun yang
+membutuhkan. Bila bermanfaat dan ingin memberi dukungan:
+
+<p>
+  <a href="https://teer.id/alpandi15_" target="_blank">
+    <img src="https://img.shields.io/badge/Trakteer-Dukung%20Pengembang-BE1E2D?style=for-the-badge&logo=buymeacoffee&logoColor=white" alt="Dukung via Trakteer"/>
+  </a>
+  &nbsp;
+  <a href="https://saweria.co/alpandi15" target="_blank">
+    <img src="https://img.shields.io/badge/Saweria-Kirim%20Dukungan-FAAF3A?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Dukung via Saweria"/>
+  </a>
+</p>
+
+| Kanal | Tautan |
+|---|---|
+| ☕ Trakteer | [teer.id/alpandi15_](https://teer.id/alpandi15_) |
+| 💛 Saweria | [saweria.co/alpandi15](https://saweria.co/alpandi15) |
+
+Dukungan sekecil apa pun sangat membantu untuk menjaga aplikasi ini tetap dikembangkan.
+Yang tidak bisa berdonasi pun tetap dipersilakan memakainya sepenuhnya, gratis. 🙏
+
+---
+
+<p align="center">
+  Semoga menjadi amal jariyah bagi kita semua. <b>Aamiin.</b>
+</p>

@@ -1,12 +1,18 @@
--- Repair bootstrap admin auth rows to avoid GoTrue login error:
+-- Memperbaiki baris auth milik akun bootstrap agar tidak memicu error GoTrue:
 -- {"code":"unexpected_failure","message":"Database error querying schema"}
--- Safe to run multiple times.
+--
+-- Sama seperti migrasi bootstrap, akun yang diperbaiki ditentukan operator lewat
+-- setelan zakatku.bootstrap_admin_email. Tanpa setelan itu migrasi ini dilewati.
+-- Aman dijalankan berulang kali.
 
 DO $$
 DECLARE
-  bootstrap_email TEXT := 'admin@zakatku.local';
-  bootstrap_password TEXT := 'Admin123!';
-  bootstrap_full_name TEXT := 'Super Admin';
+  bootstrap_email TEXT := nullif(btrim(coalesce(current_setting('zakatku.bootstrap_admin_email', true), '')), '');
+  bootstrap_password TEXT := nullif(coalesce(current_setting('zakatku.bootstrap_admin_password', true), ''), '');
+  bootstrap_full_name TEXT := coalesce(
+    nullif(btrim(coalesce(current_setting('zakatku.bootstrap_admin_name', true), '')), ''),
+    'Super Admin'
+  );
   bootstrap_user_id UUID;
   auth_instance_id UUID;
 BEGIN
@@ -17,6 +23,10 @@ BEGIN
   LIMIT 1;
 
   auth_instance_id := COALESCE(auth_instance_id, '00000000-0000-0000-0000-000000000000'::UUID);
+
+  IF bootstrap_email IS NULL OR bootstrap_password IS NULL THEN
+    RETURN;
+  END IF;
 
   SELECT id
   INTO bootstrap_user_id
