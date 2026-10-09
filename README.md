@@ -49,8 +49,8 @@ siapa pun di dalam repositori ini.
 ### 1. Clone dan pasang dependensi
 
 ```sh
-git clone https://github.com/<akun-anda>/<nama-repo>.git
-cd <nama-repo>
+git clone https://github.com/alpandi15/zis-zakat_system.git
+cd zis-zakat_system
 npm install
 ```
 
@@ -272,20 +272,28 @@ Menemukan masalah atau punya usulan? Silakan buka **Issue**.
 Aplikasi ini dikerjakan di waktu luang dan dibagikan gratis untuk masjid mana pun yang
 membutuhkan. Bila bermanfaat dan ingin memberi dukungan:
 
-<p>
-  <a href="https://teer.id/alpandi15_" target="_blank">
-    <img src="https://img.shields.io/badge/Trakteer-Dukung%20Pengembang-BE1E2D?style=for-the-badge&logo=buymeacoffee&logoColor=white" alt="Dukung via Trakteer"/>
-  </a>
-  &nbsp;
-  <a href="https://saweria.co/alpandi15" target="_blank">
-    <img src="https://img.shields.io/badge/Saweria-Kirim%20Dukungan-FAAF3A?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Dukung via Saweria"/>
-  </a>
-</p>
-
-| Kanal | Tautan |
-|---|---|
-| ☕ Trakteer | [teer.id/alpandi15_](https://teer.id/alpandi15_) |
-| 💛 Saweria | [saweria.co/alpandi15](https://saweria.co/alpandi15) |
+<table align="center">
+  <tr>
+    <td align="center" width="260">
+      <a href="https://teer.id/alpandi15_">
+        <img src="docs/logo/trakteer.jpg" alt="Dukung via Trakteer" height="76"/>
+      </a>
+    </td>
+    <td align="center" width="260">
+      <a href="https://saweria.co/alpandi15">
+        <img src="docs/logo/Saweria.webp" alt="Dukung via Saweria" height="76"/>
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://teer.id/alpandi15_"><b>teer.id/alpandi15_</b></a>
+    </td>
+    <td align="center">
+      <a href="https://saweria.co/alpandi15"><b>saweria.co/alpandi15</b></a>
+    </td>
+  </tr>
+</table>
 
 Dukungan sekecil apa pun sangat membantu untuk menjaga aplikasi ini tetap dikembangkan.
 Yang tidak bisa berdonasi pun tetap dipersilakan memakainya sepenuhnya, gratis. 🙏
