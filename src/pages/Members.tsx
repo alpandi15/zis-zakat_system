@@ -4,6 +4,7 @@ import { useRouter } from "next/router";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { DataTable, Column } from "@/components/shared/DataTable";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { Button } from "@/components/ui/button";
@@ -366,7 +367,19 @@ export default function Members() {
     <AppLayout title="Data Anggota Keluarga">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
-      <DataTable
+      <div className="space-y-4">
+        <PageHeader
+          title="Anggota Keluarga"
+          description="Data jiwa yang menjadi dasar perhitungan zakat fitrah setiap keluarga."
+          icon={Users}
+          badges={
+            <Badge variant="outline" className="rounded-full tabular-nums">
+              {members.length} data
+            </Badge>
+          }
+        />
+
+        <DataTable
         title={
           memberSource === "muzakki_members"
             ? muzakkiFilter
@@ -450,7 +463,8 @@ export default function Members() {
             </Button>
           )
         )}
-      />
+        />
+      </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent>

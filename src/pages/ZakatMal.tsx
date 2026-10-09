@@ -3,6 +3,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
+import { PageHero, StatTile } from "@/components/shared/PageHeader";
+import {
+  FORM_DIALOG_CONTENT_CLASS,
+  FormBody,
+  FormDialogHeader,
+  FormFooterBar,
+  FormSection,
+} from "@/components/shared/FormShell";
 import { CurrencyInput } from "@/components/shared/CurrencyInput";
 import {
   MuzakkiMemberSearchSelect,
@@ -38,7 +46,23 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Eye, AlertCircle, CheckCircle, Pencil, ShieldAlert, Trash2 } from "lucide-react";
+import {
+  Plus,
+  Eye,
+  AlertCircle,
+  CheckCircle,
+  Coins,
+  Gem,
+  Pencil,
+  Receipt,
+  Scale,
+  Search,
+  ShieldAlert,
+  Store,
+  Trash2,
+  Wallet,
+} from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { formatCurrency } from "@/lib/formatCurrency";
@@ -106,6 +130,8 @@ export default function ZakatMal() {
   const queryClient = useQueryClient();
 
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showAdvancedValue, setShowAdvancedValue] = useState(false);
   const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [correctingTransaction, setCorrectingTransaction] = useState<Transaction | null>(null);
@@ -194,6 +220,26 @@ export default function ZakatMal() {
     if (!createdBy) return "-";
     return creatorMap.get(createdBy) || createdBy;
   };
+
+  // Ringkasan hanya menghitung transaksi yang tidak dibatalkan.
+  const summaryStats = useMemo(() => {
+    const valid = transactions.filter((tx) => !tx.is_void);
+    return {
+      count: valid.length,
+      voidCount: transactions.length - valid.length,
+      total: valid.reduce((sum, tx) => sum + Number(tx.final_zakat_amount || 0), 0),
+      aboveNisab: valid.filter((tx) => tx.is_above_nisab).length,
+      belowNisab: valid.filter((tx) => !tx.is_above_nisab).length,
+    };
+  }, [transactions]);
+
+  const filteredTransactions = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase();
+    if (!keyword) return transactions;
+    return transactions.filter((tx) =>
+      `${tx.muzakki_member?.name || ""} ${tx.muzakki?.name || ""}`.toLowerCase().includes(keyword),
+    );
+  }, [transactions, searchTerm]);
 
   // Create transaction mutation
   const createMutation = useMutation({
@@ -339,6 +385,7 @@ export default function ZakatMal() {
     setNotes("");
     setIsOverrideGoldPrice(false);
     setCustomGoldPrice(periodGoldPrice);
+    setShowAdvancedValue(false);
   };
 
   const correctionMutation = useMutation({
@@ -497,138 +544,223 @@ export default function ZakatMal() {
     <AppLayout title="Zakat Mal">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
-      <div className="space-y-3 sm:space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-base font-semibold leading-tight sm:text-lg">
-            <span className="block">Transaksi Zakat Mal</span>
-            <span className="mt-1 block text-xs font-medium text-muted-foreground sm:text-sm">
-              {selectedPeriod?.name || "Pilih Periode"}
-            </span>
-          </h2>
-          {!isReadOnly && selectedPeriod && (
-            <Button
-              onClick={() => {
-                resetForm();
-                setIsFormOpen(true);
-              }}
-              className="h-9 w-full gap-2 text-xs sm:h-10 sm:w-auto sm:text-sm"
-            >
-              <Plus className="h-4 w-4" />
-              Tambah Transaksi
-            </Button>
-          )}
-        </div>
+      <div className="space-y-4">
+        <PageHero
+          eyebrow="Penerimaan"
+          title="Transaksi Zakat Mal"
+          description="Pencatatan zakat harta: penghasilan, emas, dan perdagangan."
+          icon={Coins}
+          tone="sky"
+          badges={
+            <>
+              <Badge variant="outline" className="rounded-full bg-background/70">
+                {selectedPeriod?.name || "Pilih periode"}
+              </Badge>
+              <Badge variant="outline" className="rounded-full bg-background/70 tabular-nums">
+                Nisab {formatCurrency(nisabValue)}
+              </Badge>
+            </>
+          }
+          highlight={{
+            label: "Total zakat mal",
+            value: formatCurrency(summaryStats.total),
+            hint: `${summaryStats.count} transaksi sah`,
+          }}
+          actions={
+            !isReadOnly && selectedPeriod ? (
+              <Button
+                onClick={() => {
+                  resetForm();
+                  setIsFormOpen(true);
+                }}
+                className="h-10 w-full gap-2 rounded-xl shadow-md shadow-primary/20 sm:w-auto"
+              >
+                <Plus className="h-4 w-4" />
+                Tambah Transaksi
+              </Button>
+            ) : null
+          }
+        />
 
-        <Card>
-          <CardContent className="pt-4 sm:pt-6">
+        <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <StatTile
+            label="Transaksi Sah"
+            value={summaryStats.count.toLocaleString("id-ID")}
+            hint={`${summaryStats.voidCount} dibatalkan`}
+            icon={Receipt}
+            tone="primary"
+            delay={60}
+          />
+          <StatTile
+            label="Total Zakat Mal"
+            value={formatCurrency(summaryStats.total)}
+            hint="Akumulasi periode ini"
+            icon={Coins}
+            tone="sky"
+            delay={120}
+          />
+          <StatTile
+            label="Mencapai Nisab"
+            value={summaryStats.aboveNisab.toLocaleString("id-ID")}
+            hint={`${summaryStats.belowNisab} belum mencapai`}
+            icon={CheckCircle}
+            tone="violet"
+            delay={180}
+          />
+          <StatTile
+            label="Rata-rata"
+            value={formatCurrency(summaryStats.count > 0 ? summaryStats.total / summaryStats.count : 0)}
+            hint="Per transaksi sah"
+            icon={Scale}
+            tone="amber"
+            delay={240}
+          />
+        </section>
+
+        <Card style={{ animationDelay: "300ms" }} className="border-border/70 opacity-0 shadow-sm animate-rise motion-reduce:animate-none motion-reduce:opacity-100">
+          <CardHeader className="gap-3 pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-base">Daftar transaksi</CardTitle>
+              <div className="relative w-full sm:w-[280px]">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Cari nama pembayar"
+                  className="h-10 rounded-xl pl-9"
+                />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
             {isLoading ? (
-              <p className="text-muted-foreground text-center py-8">Memuat data...</p>
-            ) : transactions.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">
-                Belum ada transaksi zakat mal untuk periode ini
-              </p>
+              <p className="py-12 text-center text-sm text-muted-foreground">Memuat data...</p>
+            ) : filteredTransactions.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-12 text-center">
+                <Receipt className="h-8 w-8 text-muted-foreground/60" />
+                <p className="text-sm text-muted-foreground">
+                  {transactions.length === 0
+                    ? "Belum ada transaksi zakat mal untuk periode ini."
+                    : "Tidak ada transaksi yang cocok dengan pencarian."}
+                </p>
+              </div>
             ) : (
-              <Table className="min-w-[920px]">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>No. Transaksi</TableHead>
-                    <TableHead>Tanggal</TableHead>
-                    <TableHead>Pembayar</TableHead>
-                    <TableHead>Jenis</TableHead>
-                    <TableHead>Nisab</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Zakat</TableHead>
-                    <TableHead>Input Oleh</TableHead>
-                    <TableHead className="text-right">Aksi</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transactions.map(tx => (
-                    <TableRow key={tx.id}>
-                      <TableCell className="font-mono text-xs">
-                        {tx.transaction_no ? `ZM-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {format(new Date(tx.transaction_date), "dd MMM yyyy, HH.mm", { locale: idLocale })}
-                      </TableCell>
-                      <TableCell>
-                        <p className="font-medium">{tx.muzakki_member?.name || tx.muzakki?.name || "-"}</p>
-                        {tx.muzakki_member?.relationship && (
-                          <p className="text-xs text-muted-foreground">
-                            {RELATIONSHIP_LABELS[tx.muzakki_member.relationship]}
-                          </p>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{ZAKAT_TYPE_LABELS[tx.zakat_type]}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        {tx.is_above_nisab ? (
-                          <Badge variant="default" className="gap-1">
-                            <CheckCircle className="h-3 w-3" /> Tercapai
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary" className="gap-1">
-                            <AlertCircle className="h-3 w-3" /> Belum
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {tx.is_void ? (
-                          <Badge variant="destructive">Void</Badge>
-                        ) : isTransactionLocked(tx) ? (
-                          <Badge variant="secondary">
-                            Lock {tx.locked_batch?.batch_code || `#${tx.locked_batch?.batch_no || "-"}`}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">Editable</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-right font-medium">
-                        {formatCurrency(tx.final_zakat_amount)}
-                        {tx.is_manually_overridden && (
-                          <span className="text-xs text-muted-foreground ml-1">(Override)</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground sm:text-sm">{getCreatorName(tx.created_by)}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="icon" onClick={() => setViewingTransaction(tx)}>
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          {!isReadOnly && !tx.is_void && !isTransactionLocked(tx) && (
-                            <Button variant="ghost" size="icon" onClick={() => void handleOpenEdit(tx)}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {!isReadOnly && !tx.is_void && isTransactionLocked(tx) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setCorrectingTransaction(tx);
-                                setCorrectionReason("");
-                              }}
-                            >
-                              <ShieldAlert className="h-4 w-4 text-amber-600" />
-                            </Button>
-                          )}
-                          {!isReadOnly && !isTransactionLocked(tx) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDelete(tx)}
-                              disabled={deleteMutation.isPending}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
+              <div className="overflow-x-auto rounded-xl border border-border/60">
+                <Table className="min-w-[920px]">
+                  <TableHeader>
+                    <TableRow className="bg-gradient-to-r from-muted/70 to-muted/25 hover:bg-transparent">
+                      <TableHead>No. Transaksi</TableHead>
+                      <TableHead>Tanggal</TableHead>
+                      <TableHead>Pembayar</TableHead>
+                      <TableHead>Jenis</TableHead>
+                      <TableHead>Nisab</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Zakat</TableHead>
+                      <TableHead>Input Oleh</TableHead>
+                      <TableHead className="text-right">Aksi</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredTransactions.map((tx) => (
+                      <TableRow
+                        key={tx.id}
+                        className={`transition-colors hover:bg-primary/[0.04] ${tx.is_void ? "opacity-60" : ""}`}
+                      >
+                        <TableCell className="font-mono text-xs">
+                          {tx.transaction_no ? `ZM-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {format(new Date(tx.transaction_date), "dd MMM yyyy, HH.mm", { locale: idLocale })}
+                        </TableCell>
+                        <TableCell>
+                          <p className="font-medium">{tx.muzakki_member?.name || tx.muzakki?.name || "-"}</p>
+                          {tx.muzakki_member?.relationship && (
+                            <p className="text-[11px] text-muted-foreground">
+                              {RELATIONSHIP_LABELS[tx.muzakki_member.relationship]}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="rounded-full">
+                            {ZAKAT_TYPE_LABELS[tx.zakat_type]}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {tx.is_above_nisab ? (
+                            <Badge className="gap-1 rounded-full">
+                              <CheckCircle className="h-3 w-3" /> Tercapai
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="gap-1 rounded-full">
+                              <AlertCircle className="h-3 w-3" /> Belum
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {tx.is_void ? (
+                            <Badge variant="destructive" className="rounded-full">
+                              Void
+                            </Badge>
+                          ) : isTransactionLocked(tx) ? (
+                            <Badge className="!whitespace-nowrap rounded-full bg-amber-500 text-white hover:bg-amber-500">
+                              Terkunci {tx.locked_batch?.batch_code || `#${tx.locked_batch?.batch_no || "-"}`}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="rounded-full">
+                              Dapat diubah
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
+                          {formatCurrency(tx.final_zakat_amount)}
+                          {tx.is_manually_overridden && (
+                            <span className="ml-1 text-[11px] font-normal text-muted-foreground">(override)</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                          {getCreatorName(tx.created_by)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-0.5">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewingTransaction(tx)}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            {!isReadOnly && !tx.is_void && !isTransactionLocked(tx) && (
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void handleOpenEdit(tx)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {!isReadOnly && !tx.is_void && isTransactionLocked(tx) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => {
+                                  setCorrectingTransaction(tx);
+                                  setCorrectionReason("");
+                                }}
+                              >
+                                <ShieldAlert className="h-4 w-4 text-amber-600" />
+                              </Button>
+                            )}
+                            {!isReadOnly && !isTransactionLocked(tx) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => handleDelete(tx)}
+                                disabled={deleteMutation.isPending}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -642,236 +774,271 @@ export default function ZakatMal() {
           if (!open) resetForm();
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingTransaction ? "Edit Transaksi Zakat Mal" : "Tambah Transaksi Zakat Mal"}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Anggota Pembayar *</Label>
-                <MuzakkiMemberSearchSelect
-                  value={selectedMemberId}
-                  onChange={(value, selected) => {
-                    setSelectedMemberId(value);
-                    setSelectedPayerMember(selected);
-                  }}
-                  placeholder="Cari anggota atau tambah muzakki baru..."
-                />
-                <p className="text-xs text-muted-foreground">
-                  Pencarian langsung ke tabel anggota (`muzakki_members`). Jika belum ada, pilih Tambah Muzakki Baru.
-                </p>
-                {selectedPayerMember && (
-                  <p className="text-xs text-muted-foreground">
-                    KK: {selectedPayerMember.muzakki?.name || "Tanpa KK"} • Hubungan:{" "}
-                    {RELATIONSHIP_LABELS[selectedPayerMember.relationship]}
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label>Jenis Zakat *</Label>
-                <Select value={zakatType} onValueChange={(v) => setZakatType(v as Transaction["zakat_type"])}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="income">Penghasilan</SelectItem>
-                    <SelectItem value="gold">Emas</SelectItem>
-                    <SelectItem value="trade">Perdagangan</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+        <DialogContent className={FORM_DIALOG_CONTENT_CLASS}>
+          <FormDialogHeader
+            icon={Coins}
+            title={editingTransaction ? "Edit Transaksi Zakat Mal" : "Tambah Transaksi Zakat Mal"}
+            description={`Periode ${selectedPeriod?.name || "-"} · nisab ${formatCurrency(nisabValue)}`}
+          />
 
-            {/* Calculation Mode Selection */}
-            <div className="border rounded-lg p-4 space-y-3">
-              <h4 className="font-medium text-sm">Mode Perhitungan</h4>
-              <RadioGroup value={calculationMode} onValueChange={(v) => handleModeChange(v as CalculationMode)}>
-                <div className="flex gap-6">
-                  <div className="flex items-center gap-2">
-                    <RadioGroupItem value="from_assets" id="from_assets" />
-                    <Label htmlFor="from_assets" className="cursor-pointer text-sm">Input Total Harta</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <RadioGroupItem value="from_zakat" id="from_zakat" />
-                    <Label htmlFor="from_zakat" className="cursor-pointer text-sm">Input Jumlah Zakat Langsung</Label>
-                  </div>
-                </div>
-              </RadioGroup>
-            </div>
-
-            {calculationMode === "from_assets" ? (
-              <div className="grid gap-4 md:grid-cols-2">
+          <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+            <FormBody>
+              <FormSection step={1} title="Pembayar & jenis zakat" description="Cari anggota pembayar, lalu tentukan jenis hartanya.">
                 <div className="space-y-2">
-                  <Label>Total Harta *</Label>
-                  <CurrencyInput
-                    value={grossAmount}
-                    onChange={setGrossAmount}
-                    placeholder="0"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Potongan/Hutang</Label>
-                  <CurrencyInput
-                    value={deductions}
-                    onChange={setDeductions}
-                    placeholder="0"
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Jumlah Zakat Dibayar *</Label>
-                  <CurrencyInput
-                    value={directZakatInput}
-                    onChange={setDirectZakatInput}
-                    placeholder="0"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Harta bersih terhitung: {formatCurrency(netAmount)}
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Potongan/Hutang (opsional)</Label>
-                  <CurrencyInput
-                    value={deductions}
-                    onChange={setDeductions}
-                    placeholder="0"
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Nisab Override Section */}
-            <div className="border rounded-lg p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="font-medium text-sm">Konfigurasi Nisab</h4>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Override</span>
-                  <Switch
-                    checked={isOverrideGoldPrice}
-                    onCheckedChange={(checked) => {
-                      setIsOverrideGoldPrice(checked);
-                      if (checked) setCustomGoldPrice(periodGoldPrice);
+                  <Label className="text-xs text-muted-foreground">Anggota pembayar *</Label>
+                  <MuzakkiMemberSearchSelect
+                    value={selectedMemberId}
+                    onChange={(value, selected) => {
+                      setSelectedMemberId(value);
+                      setSelectedPayerMember(selected);
                     }}
+                    placeholder="Cari anggota atau tambah muzakki baru..."
                   />
+                  {selectedPayerMember && (
+                    <p className="text-[11px] text-muted-foreground">
+                      KK: {selectedPayerMember.muzakki?.name || "Tanpa KK"} ·{" "}
+                      {RELATIONSHIP_LABELS[selectedPayerMember.relationship]}
+                    </p>
+                  )}
                 </div>
-              </div>
-              
-              {isOverrideGoldPrice ? (
+
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Label className="text-sm">Harga Emas/gram:</Label>
-                    <CurrencyInput
-                      id="customGoldPrice"
-                      value={customGoldPrice}
-                      onChange={setCustomGoldPrice}
-                      className="w-44 border-amber-500"
-                    />
-                    <Badge variant="outline" className="text-amber-600 border-amber-500">Custom</Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Nisab = {NISAB_GOLD_GRAMS}g × Rp {goldPricePerGram.toLocaleString("id-ID")} = {formatCurrency(nisabValue)}
-                  </p>
+                  <Label className="text-xs text-muted-foreground">Jenis zakat *</Label>
+                  <RadioGroup
+                    value={zakatType}
+                    onValueChange={(v) => setZakatType(v as Transaction["zakat_type"])}
+                    className="grid grid-cols-3 gap-2"
+                  >
+                    {[
+                      { value: "income", label: "Penghasilan", icon: Wallet },
+                      { value: "gold", label: "Emas", icon: Gem },
+                      { value: "trade", label: "Perdagangan", icon: Store },
+                    ].map((option) => (
+                      <div key={option.value}>
+                        <RadioGroupItem value={option.value} id={`zakat-type-${option.value}`} className="peer sr-only" />
+                        <Label
+                          htmlFor={`zakat-type-${option.value}`}
+                          className="flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-border/60 bg-background px-2 py-3 text-center transition-all duration-200 hover:border-primary/40 peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/[0.08] peer-data-[state=checked]:shadow-sm"
+                        >
+                          <option.icon className="h-4 w-4 text-primary" />
+                          <span className="text-[11px] font-medium sm:text-xs">{option.label}</span>
+                        </Label>
+                      </div>
+                    ))}
+                  </RadioGroup>
                 </div>
-              ) : (
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">
-                    Harga Emas: Rp {periodGoldPrice.toLocaleString("id-ID")}/gram (dari periode)
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Nisab = {NISAB_GOLD_GRAMS}g × Rp {periodGoldPrice.toLocaleString("id-ID")} = {formatCurrency(nisabValue)}
-                  </p>
-                </div>
-              )}
-            </div>
+              </FormSection>
 
-            {/* Calculation Summary */}
-            <Card className={isAboveNisab ? "border-green-500/50 bg-green-50/50" : "border-yellow-500/50 bg-yellow-50/50"}>
-              <CardContent className="pt-4">
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span>Harta Bersih</span>
-                    <span className="font-medium">{formatCurrency(netAmount)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Nisab</span>
-                    <span>{formatCurrency(nisabValue)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span>Status Nisab</span>
-                    {isAboveNisab ? (
-                      <Badge variant="default" className="gap-1">
-                        <CheckCircle className="h-3 w-3" /> Wajib Zakat
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="gap-1">
-                        <AlertCircle className="h-3 w-3" /> Belum Wajib
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex justify-between border-t pt-2">
-                    <span>Zakat ({ZAKAT_PERCENTAGE}%)</span>
-                    <span className="font-bold text-lg">{formatCurrency(calculatedZakat)}</span>
+              <FormSection
+                step={2}
+                title="Cara menghitung"
+                description={
+                  calculationMode === "from_assets"
+                    ? "Sistem menghitung 2,5% dari harta bersih."
+                    : "Masukkan langsung jumlah zakat yang dibayarkan."
+                }
+              >
+                <RadioGroup
+                  value={calculationMode}
+                  onValueChange={(v) => handleModeChange(v as CalculationMode)}
+                  className="grid grid-cols-2 gap-2"
+                >
+                  {[
+                    { value: "from_assets", label: "Dari total harta" },
+                    { value: "from_zakat", label: "Isi zakat langsung" },
+                  ].map((option) => (
+                    <div key={option.value}>
+                      <RadioGroupItem value={option.value} id={option.value} className="peer sr-only" />
+                      <Label
+                        htmlFor={option.value}
+                        className="flex cursor-pointer items-center justify-center rounded-xl border border-border/60 bg-background px-3 py-2.5 text-center text-xs font-medium transition-all duration-200 hover:border-primary/40 peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/[0.08] peer-data-[state=checked]:shadow-sm sm:text-sm"
+                      >
+                        {option.label}
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {calculationMode === "from_assets" ? (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">Total harta *</Label>
+                        <CurrencyInput value={grossAmount} onChange={setGrossAmount} placeholder="0" className="h-11 rounded-xl" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">Potongan / hutang</Label>
+                        <CurrencyInput value={deductions} onChange={setDeductions} placeholder="0" className="h-11 rounded-xl" />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">Jumlah zakat dibayar *</Label>
+                        <CurrencyInput
+                          value={directZakatInput}
+                          onChange={setDirectZakatInput}
+                          placeholder="0"
+                          className="h-11 rounded-xl"
+                        />
+                        <p className="text-[11px] text-muted-foreground tabular-nums">
+                          Harta bersih terhitung: {formatCurrency(netAmount)}
+                        </p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">Potongan / hutang (opsional)</Label>
+                        <CurrencyInput value={deductions} onChange={setDeductions} placeholder="0" className="h-11 rounded-xl" />
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div
+                  className={`rounded-xl border p-3 ${
+                    isAboveNisab ? "border-emerald-300/70 bg-emerald-50/60" : "border-amber-300/70 bg-amber-50/60"
+                  }`}
+                >
+                  <div className="space-y-1.5 text-xs sm:text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Harta bersih</span>
+                      <span className="font-medium tabular-nums">{formatCurrency(netAmount)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Nisab</span>
+                      <span className="tabular-nums">{formatCurrency(nisabValue)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-1.5">
+                      <span className="text-muted-foreground">Status</span>
+                      {isAboveNisab ? (
+                        <Badge className="gap-1 rounded-full">
+                          <CheckCircle className="h-3 w-3" /> Wajib zakat
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="gap-1 rounded-full">
+                          <AlertCircle className="h-3 w-3" /> Belum wajib
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </FormSection>
 
-            {/* Manual Override */}
-            <div className="space-y-3 border rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="override">Override Manual</Label>
-                <Switch
-                  id="override"
-                  checked={isManualOverride}
-                  onCheckedChange={setIsManualOverride}
+              <FormSection
+                step={3}
+                title="Nisab & penyesuaian"
+                description={`Nisab = ${NISAB_GOLD_GRAMS} gram emas × harga emas per gram.`}
+                action={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0 rounded-lg text-xs"
+                    onClick={() => setShowAdvancedValue((prev) => !prev)}
+                  >
+                    {showAdvancedValue ? "Tutup" : "Ubah nilai"}
+                  </Button>
+                }
+              >
+                {!showAdvancedValue ? (
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <Badge variant="outline" className="rounded-full">
+                      {isOverrideGoldPrice || isManualOverride ? "Ada penyesuaian" : "Mengikuti setelan periode"}
+                    </Badge>
+                    <span className="tabular-nums">Harga emas {formatCurrency(goldPricePerGram)}/gram</span>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="rounded-xl border border-border/60 bg-background p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label className="text-xs sm:text-sm">Harga emas per gram</Label>
+                        <Switch
+                          checked={isOverrideGoldPrice}
+                          onCheckedChange={(checked) => {
+                            setIsOverrideGoldPrice(checked);
+                            if (checked) setCustomGoldPrice(periodGoldPrice);
+                          }}
+                        />
+                      </div>
+                      {isOverrideGoldPrice ? (
+                        <CurrencyInput
+                          id="customGoldPrice"
+                          value={customGoldPrice}
+                          onChange={setCustomGoldPrice}
+                          className="mt-2 h-11 rounded-xl border-amber-400"
+                        />
+                      ) : (
+                        <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">
+                          {formatCurrency(periodGoldPrice)} / gram (dari setelan periode)
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-border/60 bg-background p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label htmlFor="override" className="text-xs sm:text-sm">
+                          Override jumlah zakat
+                        </Label>
+                        <Switch id="override" checked={isManualOverride} onCheckedChange={setIsManualOverride} />
+                      </div>
+                      {isManualOverride && (
+                        <div className="mt-2 space-y-2">
+                          <CurrencyInput
+                            id="manualAmount"
+                            value={manualAmount}
+                            onChange={setManualAmount}
+                            placeholder="0"
+                            className="h-11 rounded-xl border-amber-400"
+                          />
+                          <Textarea
+                            id="overrideReason"
+                            value={overrideReason}
+                            onChange={(e) => setOverrideReason(e.target.value)}
+                            placeholder="Alasan override wajib diisi..."
+                            required={isManualOverride}
+                            className="min-h-[64px] rounded-xl"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </FormSection>
+
+              <FormSection step={4} title="Catatan" description="Opsional, misalnya sumber harta atau keterangan lain.">
+                <Textarea
+                  id="notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Catatan transaksi (opsional)"
+                  className="min-h-[72px] rounded-xl"
                 />
-              </div>
-              {isManualOverride && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="manualAmount">Jumlah Zakat Manual (Rp)</Label>
-                    <CurrencyInput
-                      id="manualAmount"
-                      value={manualAmount}
-                      onChange={setManualAmount}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="overrideReason">Alasan Override *</Label>
-                    <Textarea
-                      id="overrideReason"
-                      value={overrideReason}
-                      onChange={(e) => setOverrideReason(e.target.value)}
-                      placeholder="Jelaskan alasan override..."
-                      required={isManualOverride}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
+              </FormSection>
+            </FormBody>
 
-            <div className="space-y-2">
-              <Label htmlFor="notes">Catatan</Label>
-              <Textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Catatan transaksi (opsional)"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => { resetForm(); setIsFormOpen(false); }}>
+            <FormFooterBar
+              summaryLabel="Zakat dibayarkan"
+              summaryValue={formatCurrency(isManualOverride ? manualAmount : calculatedZakat)}
+              summaryHint={
+                isManualOverride
+                  ? "Nilai override manual"
+                  : `${ZAKAT_PERCENTAGE}% dari harta bersih ${formatCurrency(netAmount)}`
+              }
+            >
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => {
+                  resetForm();
+                  setIsFormOpen(false);
+                }}
+              >
                 Batal
               </Button>
-              <Button type="submit" disabled={createMutation.isPending}>
-                {editingTransaction ? "Simpan Perubahan" : "Simpan Transaksi"}
+              <Button type="submit" className="rounded-xl" disabled={createMutation.isPending || !selectedMemberId}>
+                {createMutation.isPending ? "Menyimpan..." : editingTransaction ? "Simpan Perubahan" : "Simpan Transaksi"}
               </Button>
-            </div>
+            </FormFooterBar>
           </form>
         </DialogContent>
       </Dialog>

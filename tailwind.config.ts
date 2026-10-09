@@ -106,6 +106,26 @@ export default {
           from: { opacity: "0", transform: "scale(0.95)" },
           to: { opacity: "1", transform: "scale(1)" },
         },
+        aurora: {
+          "0%, 100%": { transform: "translate3d(0, 0, 0) scale(1)" },
+          "50%": { transform: "translate3d(4%, -6%, 0) scale(1.18)" },
+        },
+        marquee: {
+          from: { transform: "translateX(0)" },
+          to: { transform: "translateX(-50%)" },
+        },
+        "glow-pulse": {
+          "0%, 100%": { opacity: "0.55", transform: "scale(1)" },
+          "50%": { opacity: "1", transform: "scale(1.35)" },
+        },
+        rise: {
+          from: { opacity: "0", transform: "translateY(16px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+        sheen: {
+          "0%": { transform: "translateX(-130%)" },
+          "60%, 100%": { transform: "translateX(230%)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -113,6 +133,11 @@ export default {
         "fade-in": "fade-in 0.5s ease-out forwards",
         "slide-up": "slide-up 0.5s ease-out forwards",
         "scale-in": "scale-in 0.3s ease-out forwards",
+        aurora: "aurora 18s ease-in-out infinite",
+        marquee: "marquee 32s linear infinite",
+        "glow-pulse": "glow-pulse 2.4s ease-in-out infinite",
+        rise: "rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards",
+        sheen: "sheen 5s ease-in-out infinite",
       },
     },
   },

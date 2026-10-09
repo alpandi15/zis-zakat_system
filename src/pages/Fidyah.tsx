@@ -3,6 +3,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
+import { PageHero, StatTile } from "@/components/shared/PageHeader";
+import {
+  FORM_DIALOG_CONTENT_CLASS,
+  FormBody,
+  FormDialogHeader,
+  FormFooterBar,
+  FormSection,
+} from "@/components/shared/FormShell";
 import { CurrencyInput } from "@/components/shared/CurrencyInput";
 import {
   MuzakkiMemberSearchSelect,
@@ -11,7 +19,7 @@ import {
 import { usePeriod } from "@/contexts/PeriodContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -39,7 +47,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Eye, Pencil, ShieldAlert, Trash2 } from "lucide-react";
+import {
+  Plus,
+  Minus,
+  Eye,
+  Banknote,
+  CalendarDays,
+  Heart,
+  Pencil,
+  Receipt,
+  Search,
+  ShieldAlert,
+  Trash2,
+  Utensils,
+} from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { formatCurrency } from "@/lib/formatCurrency";
@@ -108,6 +129,7 @@ export default function FidyahPage() {
   const queryClient = useQueryClient();
 
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
   const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [correctingTransaction, setCorrectingTransaction] = useState<Transaction | null>(null);
@@ -134,6 +156,7 @@ export default function FidyahPage() {
   const dailyRateCash = isOverrideDailyRate ? customDailyRate : periodDailyRate;
 
   // Calculated values
+  const dailyRate = dailyRateCash;
   const totalCash = paymentType === "cash" ? missedDays * dailyRateCash : 0;
   const totalFood = paymentType === "food" ? missedDays * dailyRateFood : 0;
   const isTransactionLocked = (tx: Transaction) => Boolean(tx.locked_batch_id && tx.locked_batch?.status !== "cancelled");
@@ -183,6 +206,24 @@ export default function FidyahPage() {
     if (!createdBy) return "-";
     return creatorMap.get(createdBy) || createdBy;
   };
+
+  // Ringkasan hanya menghitung transaksi yang tidak dibatalkan.
+  const summaryStats = useMemo(() => {
+    const valid = transactions.filter((tx) => !tx.is_void);
+    return {
+      count: valid.length,
+      voidCount: transactions.length - valid.length,
+      cash: valid.reduce((sum, tx) => sum + Number(tx.cash_amount || 0), 0),
+      food: valid.reduce((sum, tx) => sum + Number(tx.food_amount_kg || 0), 0),
+      days: valid.reduce((sum, tx) => sum + Number(tx.missed_days || 0), 0),
+    };
+  }, [transactions]);
+
+  const filteredTransactions = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase();
+    if (!keyword) return transactions;
+    return transactions.filter((tx) => (tx.payer_name || "").toLowerCase().includes(keyword));
+  }, [transactions, searchTerm]);
 
   // Create transaction mutation
   const createMutation = useMutation({
@@ -500,129 +541,212 @@ export default function FidyahPage() {
     <AppLayout title="Fidyah">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
-      <div className="space-y-3 sm:space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-base font-semibold leading-tight sm:text-lg">
-            <span className="block">Transaksi Fidyah</span>
-            <span className="mt-1 block text-xs font-medium text-muted-foreground sm:text-sm">
-              {selectedPeriod?.name || "Pilih Periode"}
-            </span>
-          </h2>
-          {!isReadOnly && selectedPeriod && (
-            <Button
-              onClick={() => {
-                resetForm();
-                setIsFormOpen(true);
-              }}
-              className="h-9 w-full gap-2 text-xs sm:h-10 sm:w-auto sm:text-sm"
-            >
-              <Plus className="h-4 w-4" />
-              Tambah Transaksi
-            </Button>
-          )}
-        </div>
+      <div className="space-y-4">
+        <PageHero
+          eyebrow="Penerimaan"
+          title="Transaksi Fidyah"
+          description="Pencatatan fidyah pengganti puasa dalam bentuk uang maupun makanan."
+          icon={Heart}
+          tone="rose"
+          badges={
+            <>
+              <Badge variant="outline" className="rounded-full bg-background/70">
+                {selectedPeriod?.name || "Pilih periode"}
+              </Badge>
+              <Badge variant="outline" className="rounded-full bg-background/70 tabular-nums">
+                Tarif {formatCurrency(periodDailyRate)} / hari
+              </Badge>
+            </>
+          }
+          highlight={{
+            label: "Total fidyah uang",
+            value: formatCurrency(summaryStats.cash),
+            hint: `+ ${summaryStats.food.toLocaleString("id-ID", { maximumFractionDigits: 2 })} kg makanan`,
+          }}
+          actions={
+            !isReadOnly && selectedPeriod ? (
+              <Button
+                onClick={() => {
+                  resetForm();
+                  setIsFormOpen(true);
+                }}
+                className="h-10 w-full gap-2 rounded-xl shadow-md shadow-primary/20 sm:w-auto"
+              >
+                <Plus className="h-4 w-4" />
+                Tambah Transaksi
+              </Button>
+            ) : null
+          }
+        />
 
-        <Card>
-          <CardContent className="pt-4 sm:pt-6">
+        <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <StatTile
+            label="Transaksi Sah"
+            value={summaryStats.count.toLocaleString("id-ID")}
+            hint={`${summaryStats.voidCount} dibatalkan`}
+            icon={Receipt}
+            tone="primary"
+            delay={60}
+          />
+          <StatTile
+            label="Total Uang"
+            value={formatCurrency(summaryStats.cash)}
+            hint="Fidyah berbentuk uang"
+            icon={Banknote}
+            tone="sky"
+            delay={120}
+          />
+          <StatTile
+            label="Total Makanan"
+            value={`${summaryStats.food.toLocaleString("id-ID", { maximumFractionDigits: 2 })} kg`}
+            hint="Fidyah berbentuk makanan"
+            icon={Utensils}
+            tone="amber"
+            delay={180}
+          />
+          <StatTile
+            label="Total Hari"
+            value={`${summaryStats.days.toLocaleString("id-ID")} hari`}
+            hint="Akumulasi hari yang difidyahkan"
+            icon={CalendarDays}
+            tone="violet"
+            delay={240}
+          />
+        </section>
+
+        <Card style={{ animationDelay: "300ms" }} className="border-border/70 opacity-0 shadow-sm animate-rise motion-reduce:animate-none motion-reduce:opacity-100">
+          <CardHeader className="gap-3 pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-base">Daftar transaksi</CardTitle>
+              <div className="relative w-full sm:w-[280px]">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Cari nama pembayar"
+                  className="h-10 rounded-xl pl-9"
+                />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
             {isLoading ? (
-              <p className="text-muted-foreground text-center py-8">Memuat data...</p>
-            ) : transactions.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">
-                Belum ada transaksi fidyah untuk periode ini
-              </p>
+              <p className="py-12 text-center text-sm text-muted-foreground">Memuat data...</p>
+            ) : filteredTransactions.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-12 text-center">
+                <Receipt className="h-8 w-8 text-muted-foreground/60" />
+                <p className="text-sm text-muted-foreground">
+                  {transactions.length === 0
+                    ? "Belum ada transaksi fidyah untuk periode ini."
+                    : "Tidak ada transaksi yang cocok dengan pencarian."}
+                </p>
+              </div>
             ) : (
-              <Table className="min-w-[860px]">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>No. Transaksi</TableHead>
-                    <TableHead>Tanggal</TableHead>
-                    <TableHead>Pembayar</TableHead>
-                    <TableHead>Alasan</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Hari</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead>Input Oleh</TableHead>
-                    <TableHead className="text-right">Aksi</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transactions.map((tx) => (
-                    <TableRow key={tx.id}>
-                      <TableCell className="font-mono text-xs">
-                        {tx.transaction_no ? `FD-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {format(new Date(tx.transaction_date), "dd MMM yyyy, HH.mm", { locale: idLocale })}
-                      </TableCell>
-                      <TableCell>
-                        <p className="font-medium">{tx.payer_name}</p>
-                        {tx.payer_member?.relationship && (
-                          <p className="text-xs text-muted-foreground">
-                            {RELATIONSHIP_LABELS[tx.payer_member.relationship]}
-                          </p>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{REASON_LABELS[tx.reason] || tx.reason}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
+              <div className="overflow-x-auto rounded-xl border border-border/60">
+                <Table className="min-w-[860px]">
+                  <TableHeader>
+                    <TableRow className="bg-gradient-to-r from-muted/70 to-muted/25 hover:bg-transparent">
+                      <TableHead>No. Transaksi</TableHead>
+                      <TableHead>Tanggal</TableHead>
+                      <TableHead>Pembayar</TableHead>
+                      <TableHead>Alasan</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Hari</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead>Input Oleh</TableHead>
+                      <TableHead className="text-right">Aksi</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredTransactions.map((tx) => (
+                      <TableRow
+                        key={tx.id}
+                        className={`transition-colors hover:bg-primary/[0.04] ${tx.is_void ? "opacity-60" : ""}`}
+                      >
+                        <TableCell className="font-mono text-xs">
+                          {tx.transaction_no ? `FD-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {format(new Date(tx.transaction_date), "dd MMM yyyy, HH.mm", { locale: idLocale })}
+                        </TableCell>
+                        <TableCell>
+                          <p className="font-medium">{tx.payer_name}</p>
+                          {tx.payer_member?.relationship && (
+                            <p className="text-[11px] text-muted-foreground">
+                              {RELATIONSHIP_LABELS[tx.payer_member.relationship]}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="rounded-full">
+                            {REASON_LABELS[tx.reason] || tx.reason}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
                           {tx.is_void ? (
-                            <Badge variant="destructive">Void</Badge>
+                            <Badge variant="destructive" className="rounded-full">
+                              Void
+                            </Badge>
                           ) : isTransactionLocked(tx) ? (
-                            <Badge variant="secondary">
-                              Lock {tx.locked_batch?.batch_code || `#${tx.locked_batch?.batch_no || "-"}`}
+                            <Badge className="!whitespace-nowrap rounded-full bg-amber-500 text-white hover:bg-amber-500">
+                              Terkunci {tx.locked_batch?.batch_code || `#${tx.locked_batch?.batch_no || "-"}`}
                             </Badge>
                           ) : (
-                            <Badge variant="outline">Editable</Badge>
+                            <Badge variant="outline" className="rounded-full">
+                              Dapat diubah
+                            </Badge>
                           )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">{tx.missed_days} hari</TableCell>
-                      <TableCell className="whitespace-nowrap text-right">
-                        {tx.payment_type === "cash"
-                          ? formatCurrency(tx.cash_amount || 0)
-                          : `${tx.food_amount_kg} kg`}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground sm:text-sm">{getCreatorName(tx.created_by)}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="icon" onClick={() => setViewingTransaction(tx)}>
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          {!isReadOnly && !tx.is_void && !isTransactionLocked(tx) && (
-                            <Button variant="ghost" size="icon" onClick={() => void handleOpenEdit(tx)}>
-                              <Pencil className="h-4 w-4" />
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-right tabular-nums">{tx.missed_days}</TableCell>
+                        <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
+                          {tx.payment_type === "cash"
+                            ? formatCurrency(tx.cash_amount || 0)
+                            : `${Number(tx.food_amount_kg || 0).toLocaleString("id-ID", { maximumFractionDigits: 2 })} kg`}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                          {getCreatorName(tx.created_by)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-0.5">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewingTransaction(tx)}>
+                              <Eye className="h-4 w-4" />
                             </Button>
-                          )}
-                          {!isReadOnly && !tx.is_void && isTransactionLocked(tx) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setCorrectingTransaction(tx);
-                                setCorrectionReason("");
-                              }}
-                            >
-                              <ShieldAlert className="h-4 w-4 text-amber-600" />
-                            </Button>
-                          )}
-                          {!isReadOnly && !isTransactionLocked(tx) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDelete(tx)}
-                              disabled={deleteMutation.isPending}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                            {!isReadOnly && !tx.is_void && !isTransactionLocked(tx) && (
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void handleOpenEdit(tx)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {!isReadOnly && !tx.is_void && isTransactionLocked(tx) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => {
+                                  setCorrectingTransaction(tx);
+                                  setCorrectionReason("");
+                                }}
+                              >
+                                <ShieldAlert className="h-4 w-4 text-amber-600" />
+                              </Button>
+                            )}
+                            {!isReadOnly && !isTransactionLocked(tx) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => handleDelete(tx)}
+                                disabled={deleteMutation.isPending}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -636,15 +760,16 @@ export default function FidyahPage() {
           if (!open) resetForm();
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingTransaction ? "Edit Transaksi Fidyah" : "Tambah Transaksi Fidyah"}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-3 border rounded-lg p-4">
-              <h3 className="font-medium">Data Pembayar</h3>
-              <div className="space-y-2">
-                <Label htmlFor="payerName">Nama Anggota Pembayar *</Label>
+        <DialogContent className={FORM_DIALOG_CONTENT_CLASS}>
+          <FormDialogHeader
+            icon={Heart}
+            title={editingTransaction ? "Edit Transaksi Fidyah" : "Tambah Transaksi Fidyah"}
+            description={`Periode ${selectedPeriod?.name || "-"} · tarif ${formatCurrency(periodDailyRate)} per hari`}
+          />
+
+          <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+            <FormBody>
+              <FormSection step={1} title="Data pembayar" description="Cari anggota yang membayar fidyah.">
                 <MuzakkiMemberSearchSelect
                   value={payerMemberId}
                   onChange={(value, selected) => {
@@ -653,112 +778,148 @@ export default function FidyahPage() {
                     setPayerPhone(selected?.muzakki?.phone || "");
                     setPayerAddress(selected?.muzakki?.address || "");
                   }}
-                  placeholder="Cari muzzaki ..."
+                  placeholder="Cari anggota atau tambah muzakki baru..."
                 />
-                <p className="text-xs text-muted-foreground">
-                  Pencarian langsung ke tabel anggota (`muzakki_members`). Jika belum ada, gunakan menu tambah muzakki baru.
-                </p>
-              </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="payerPhone">No. Telepon</Label>
-                  <Input
-                    id="payerPhone"
-                    value={payerPhone}
-                    onChange={(e) => setPayerPhone(e.target.value)}
-                    placeholder="08xxxxxxxxxx"
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="payerPhone" className="text-xs text-muted-foreground">
+                      No. telepon
+                    </Label>
+                    <Input
+                      id="payerPhone"
+                      value={payerPhone}
+                      onChange={(e) => setPayerPhone(e.target.value)}
+                      placeholder="08xxxxxxxxxx"
+                      inputMode="tel"
+                      className="h-11 rounded-xl"
+                    />
+                  </div>
+                  {selectedPayerMember && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">Hubungan</Label>
+                      <div className="flex h-11 items-center rounded-xl border border-border/60 bg-muted/40 px-3 text-sm">
+                        {RELATIONSHIP_LABELS[selectedPayerMember.relationship]}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="payerAddress" className="text-xs text-muted-foreground">
+                    Alamat (opsional)
+                  </Label>
+                  <Textarea
+                    id="payerAddress"
+                    value={payerAddress}
+                    onChange={(e) => setPayerAddress(e.target.value)}
+                    placeholder="Alamat pembayar"
+                    className="min-h-[64px] rounded-xl"
                   />
                 </div>
-                {selectedPayerMember && (
-                  <div className="space-y-2">
-                    <Label>Hubungan Anggota</Label>
-                    <div className="h-10 rounded-md border px-3 flex items-center text-sm bg-muted/30">
-                      {RELATIONSHIP_LABELS[selectedPayerMember.relationship]}
-                    </div>
-                  </div>
+              </FormSection>
+
+              <FormSection step={2} title="Alasan & jumlah hari" description="Jumlah hari puasa yang diganti dengan fidyah.">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Alasan fidyah *</Label>
+                  <Select value={reason} onValueChange={(value) => setReason(value as FidyahReason)}>
+                    <SelectTrigger className="h-11 rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(REASON_LABELS).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {reason === "other" && (
+                  <Textarea
+                    id="reasonNotes"
+                    value={reasonNotes}
+                    onChange={(e) => setReasonNotes(e.target.value)}
+                    placeholder="Jelaskan alasan fidyah..."
+                    className="min-h-[64px] rounded-xl"
+                  />
                 )}
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="payerAddress">Alamat</Label>
-                <Textarea
-                  id="payerAddress"
-                  value={payerAddress}
-                  onChange={(e) => setPayerAddress(e.target.value)}
-                  placeholder="Alamat (opsional)"
-                />
-              </div>
-            </div>
-
-            {/* Reason Section */}
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Alasan Fidyah *</Label>
-                <Select value={reason} onValueChange={(value) => setReason(value as FidyahReason)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(REASON_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="missedDays">Jumlah Hari Puasa *</Label>
-                <Input
-                  id="missedDays"
-                  type="number"
-                  value={missedDays}
-                  onChange={(e) => setMissedDays(Number(e.target.value))}
-                  min={1}
-                  max={30}
-                />
-              </div>
-            </div>
-            {reason === "other" && (
-              <div className="space-y-2">
-                <Label htmlFor="reasonNotes">Keterangan Alasan</Label>
-                <Textarea
-                  id="reasonNotes"
-                  value={reasonNotes}
-                  onChange={(e) => setReasonNotes(e.target.value)}
-                  placeholder="Jelaskan alasan fidyah..."
-                />
-              </div>
-            )}
-
-            {/* Payment Section */}
-            <div className="space-y-3 border rounded-lg p-4">
-              <h3 className="font-medium">Pembayaran</h3>
-              <div className="space-y-2">
-                <Label>Jenis Pembayaran *</Label>
-                <RadioGroup value={paymentType} onValueChange={(v) => setPaymentType(v as "cash" | "food") }>
-                  <div className="flex gap-4">
-                    <div className="flex items-center gap-2">
-                      <RadioGroupItem value="cash" id="cash" />
-                      <Label htmlFor="cash" className="cursor-pointer">Uang</Label>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Jumlah hari *</Label>
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-background p-2.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-11 w-11 shrink-0 rounded-xl"
+                      onClick={() => setMissedDays((prev) => Math.max(1, prev - 1))}
+                    >
+                      <Minus className="h-4 w-4" />
+                    </Button>
+                    <div className="min-w-0 flex-1 text-center">
+                      <Input
+                        id="missedDays"
+                        type="number"
+                        inputMode="numeric"
+                        value={missedDays}
+                        onChange={(e) => setMissedDays(Math.min(30, Math.max(1, Number(e.target.value) || 1)))}
+                        min={1}
+                        max={30}
+                        className="h-11 border-0 bg-transparent text-center text-2xl font-semibold tabular-nums shadow-none focus-visible:ring-0"
+                      />
+                      <p className="text-[11px] text-muted-foreground">hari (maksimal 30)</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <RadioGroupItem value="food" id="food" />
-                      <Label htmlFor="food" className="cursor-pointer">Makanan</Label>
-                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-11 w-11 shrink-0 rounded-xl"
+                      onClick={() => setMissedDays((prev) => Math.min(30, prev + 1))}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </FormSection>
+
+              <FormSection step={3} title="Bentuk pembayaran" description="Pilih uang atau makanan sesuai yang diterima.">
+                <RadioGroup
+                  value={paymentType}
+                  onValueChange={(v) => setPaymentType(v as "cash" | "food")}
+                  className="grid grid-cols-2 gap-2"
+                >
+                  <div>
+                    <RadioGroupItem value="cash" id="cash" className="peer sr-only" />
+                    <Label
+                      htmlFor="cash"
+                      className="flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-border/60 bg-background px-3 py-3.5 text-center transition-all duration-200 hover:border-primary/40 peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/[0.08] peer-data-[state=checked]:shadow-sm"
+                    >
+                      <Banknote className="h-5 w-5 text-emerald-600" />
+                      <span className="text-sm font-semibold">Uang</span>
+                      <span className="text-[11px] text-muted-foreground">{formatCurrency(dailyRate)} / hari</span>
+                    </Label>
+                  </div>
+                  <div>
+                    <RadioGroupItem value="food" id="food" className="peer sr-only" />
+                    <Label
+                      htmlFor="food"
+                      className="flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-border/60 bg-background px-3 py-3.5 text-center transition-all duration-200 hover:border-primary/40 peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/[0.08] peer-data-[state=checked]:shadow-sm"
+                    >
+                      <Utensils className="h-5 w-5 text-amber-600" />
+                      <span className="text-sm font-semibold">Makanan</span>
+                      <span className="text-[11px] text-muted-foreground">{dailyRateFood} kg / hari</span>
+                    </Label>
                   </div>
                 </RadioGroup>
-              </div>
 
-              {paymentType === "cash" && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">
-                      Tarif dari periode: {formatCurrency(periodDailyRate)}/hari
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <Label htmlFor="override" className="text-sm">Override</Label>
+                {paymentType === "cash" ? (
+                  <div className="rounded-xl border border-border/60 bg-background p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label htmlFor="override" className="text-xs sm:text-sm">
+                        Tarif kustom per hari
+                      </Label>
                       <Switch
                         id="override"
                         checked={isOverrideDailyRate}
@@ -768,57 +929,59 @@ export default function FidyahPage() {
                         }}
                       />
                     </div>
-                  </div>
-                  {isOverrideDailyRate && (
-                    <div className="space-y-2">
-                      <Label>Tarif Kustom per Hari (Rp)</Label>
+                    {isOverrideDailyRate ? (
                       <CurrencyInput
                         value={customDailyRate}
                         onChange={setCustomDailyRate}
                         placeholder="0"
+                        className="mt-2 h-11 rounded-xl border-amber-400"
                       />
-                    </div>
-                  )}
-                </div>
-              )}
+                    ) : (
+                      <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">
+                        {formatCurrency(periodDailyRate)} / hari (dari setelan periode)
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 rounded-xl border border-border/60 bg-background p-3">
+                    <Label htmlFor="foodRate" className="text-xs sm:text-sm">
+                      Jumlah makanan per hari (kg)
+                    </Label>
+                    <Input
+                      id="foodRate"
+                      type="number"
+                      step="0.1"
+                      value={dailyRateFood}
+                      onChange={(e) => setDailyRateFood(Number(e.target.value))}
+                      min={0.1}
+                      className="h-11 rounded-xl tabular-nums"
+                    />
+                  </div>
+                )}
+              </FormSection>
 
-              {paymentType === "food" && (
-                <div className="space-y-2">
-                  <Label htmlFor="foodRate">Jumlah Makanan per Hari (kg)</Label>
-                  <Input
-                    id="foodRate"
-                    type="number"
-                    step="0.1"
-                    value={dailyRateFood}
-                    onChange={(e) => setDailyRateFood(Number(e.target.value))}
-                    min={0.1}
-                  />
-                </div>
-              )}
+              <FormSection step={4} title="Catatan" description="Opsional, misalnya keterangan tambahan.">
+                <Textarea
+                  id="notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Catatan tambahan..."
+                  className="min-h-[72px] rounded-xl"
+                />
+              </FormSection>
+            </FormBody>
 
-              <div className="bg-muted/50 rounded-lg p-3">
-                <p className="text-sm text-muted-foreground">Total Fidyah ({missedDays} hari):</p>
-                <p className="text-xl font-bold">
-                  {paymentType === "cash" ? formatCurrency(totalCash) : `${totalFood} kg`}
-                </p>
-                {isOverrideDailyRate && <Badge variant="secondary" className="mt-1">Nilai Kustom</Badge>}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="notes">Catatan</Label>
-              <Textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Catatan tambahan..."
-              />
-            </div>
-
-            <div className="flex justify-end gap-2">
+            <FormFooterBar
+              summaryLabel="Total fidyah"
+              summaryValue={paymentType === "cash" ? formatCurrency(totalCash) : `${totalFood} kg`}
+              summaryHint={`${missedDays} hari × ${
+                paymentType === "cash" ? formatCurrency(dailyRate) : `${dailyRateFood} kg`
+              }${isOverrideDailyRate ? " (tarif kustom)" : ""}`}
+            >
               <Button
                 type="button"
                 variant="outline"
+                className="rounded-xl"
                 onClick={() => {
                   resetForm();
                   setIsFormOpen(false);
@@ -826,10 +989,10 @@ export default function FidyahPage() {
               >
                 Batal
               </Button>
-              <Button type="submit" disabled={createMutation.isPending}>
-                {editingTransaction ? "Simpan Perubahan" : "Simpan"}
+              <Button type="submit" className="rounded-xl" disabled={createMutation.isPending || !payerMemberId}>
+                {createMutation.isPending ? "Menyimpan..." : editingTransaction ? "Simpan Perubahan" : "Simpan Transaksi"}
               </Button>
-            </div>
+            </FormFooterBar>
           </form>
         </DialogContent>
       </Dialog>

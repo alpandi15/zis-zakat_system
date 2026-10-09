@@ -7,13 +7,14 @@ import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
 import { useAsnafSettings } from "@/hooks/useAsnafSettings";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { useDistributionCalculation, type AmilDistributionMode } from "@/hooks/useDistributionCalculation";
+import { usePeriodSummary } from "@/hooks/useDashboardData";
 import type { Enums, TablesInsert } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/formatCurrency";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,7 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Calculator, Coins, Wheat, Utensils, Scale, ArrowRight, Sparkles, Lock, Info } from "lucide-react";
+import { Coins, Wheat, Utensils, Scale, ArrowRight, Lock, Info, RotateCcw } from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { compareMustahikRoute } from "@/lib/mustahikRoute";
@@ -37,13 +38,6 @@ interface FundBalance {
   total_cash: number;
   total_rice_kg: number;
   total_food_kg: number;
-}
-
-interface FundLedgerRow {
-  category: FundCategory;
-  amount_cash: number | null;
-  amount_rice_kg: number | null;
-  amount_food_kg: number | null;
 }
 
 interface LockedBatchItemRow {
@@ -123,6 +117,20 @@ interface PackagingSummary {
     zakatMalCash: number;
     fidyahCash: number;
   };
+}
+
+interface PackagingRecipientCountOverrides {
+  amilCount: number;
+  nonAmilCount: number;
+}
+
+interface PackagingGroupBreakdownOptions {
+  totals: PackagingSummary["totals"];
+  amilCount: number;
+  nonAmilCount: number;
+  amilDistributionMode: AmilDistributionMode;
+  amilShareFactor: number;
+  amilPercentage: number;
 }
 
 interface PackagingSourceItem {
@@ -212,6 +220,153 @@ const createEmptyPackagingSummary = (): PackagingSummary => ({
     fidyahCash: 0,
   },
 });
+
+const clampRecipientCount = (value: number) => Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+
+const floorAverage = (total: number, recipientCount: number, scale = 1) => {
+  if (recipientCount <= 0 || total <= 0) return 0;
+  const scaledTotal = Math.max(0, Math.round(total * scale));
+  return Math.floor(scaledTotal / recipientCount) / scale;
+};
+
+const splitPackagingPortions = (
+  totalAmount: number,
+  amilCount: number,
+  nonAmilCount: number,
+  mode: AmilDistributionMode,
+  factor: number,
+  percentage: number,
+  scale = 1,
+) => {
+  const safeTotal = Math.max(0, totalAmount);
+  const scaledTotal = Math.max(0, Math.round(safeTotal * scale));
+
+  if (scaledTotal <= 0) {
+    return { amilTotal: 0, nonAmilTotal: 0 };
+  }
+
+  if (amilCount <= 0) {
+    return { amilTotal: 0, nonAmilTotal: scaledTotal / scale };
+  }
+
+  if (nonAmilCount <= 0) {
+    return { amilTotal: scaledTotal / scale, nonAmilTotal: 0 };
+  }
+
+  let amilScaled = 0;
+
+  if (mode === "proportional_with_factor") {
+    const recipientTotal = amilCount + nonAmilCount;
+    const basePerRecipientScaled = recipientTotal > 0 ? Math.floor(scaledTotal / recipientTotal) : 0;
+    const amilPerRecipientScaled = Math.floor(basePerRecipientScaled * factor);
+    amilScaled = Math.min(scaledTotal, Math.max(0, amilPerRecipientScaled * amilCount));
+  } else {
+    amilScaled = Math.min(scaledTotal, Math.max(0, Math.floor(scaledTotal * percentage)));
+  }
+
+  amilScaled = Math.min(amilScaled, Math.floor(scaledTotal / 2));
+
+  const nonAmilScaled = Math.max(0, scaledTotal - amilScaled);
+
+  return {
+    amilTotal: amilScaled / scale,
+    nonAmilTotal: nonAmilScaled / scale,
+  };
+};
+
+const buildPackagingGroupBreakdown = ({
+  totals,
+  amilCount,
+  nonAmilCount,
+  amilDistributionMode,
+  amilShareFactor,
+  amilPercentage,
+}: PackagingGroupBreakdownOptions): PackagingSummary["groupBreakdown"] => {
+  const safeAmilCount = clampRecipientCount(amilCount);
+  const safeNonAmilCount = clampRecipientCount(nonAmilCount);
+
+  const zakatFitrahCashSplit = splitPackagingPortions(
+    totals.zakatFitrahCash,
+    safeAmilCount,
+    safeNonAmilCount,
+    amilDistributionMode,
+    amilShareFactor,
+    amilPercentage,
+    1,
+  );
+
+  const zakatMalCashSplit = splitPackagingPortions(
+    totals.zakatMalCash,
+    safeAmilCount,
+    safeNonAmilCount,
+    amilDistributionMode,
+    amilShareFactor,
+    amilPercentage,
+    1,
+  );
+
+  const zakatFitrahRiceSplit = splitPackagingPortions(
+    totals.totalRiceKg,
+    safeAmilCount,
+    safeNonAmilCount,
+    amilDistributionMode,
+    amilShareFactor,
+    amilPercentage,
+    100,
+  );
+
+  const amilTotalCash = zakatFitrahCashSplit.amilTotal + zakatMalCashSplit.amilTotal;
+  const nonAmilTotalCash =
+    zakatFitrahCashSplit.nonAmilTotal + zakatMalCashSplit.nonAmilTotal + Math.max(0, totals.fidyahCash);
+  const amilTotalRiceKg = zakatFitrahRiceSplit.amilTotal;
+  const nonAmilTotalRiceKg = zakatFitrahRiceSplit.nonAmilTotal;
+  const nonAmilTotalFoodKg = Math.max(0, totals.totalFoodKg);
+
+  return {
+    amil: {
+      recipientCount: safeAmilCount,
+      totalCash: amilTotalCash,
+      totalRiceKg: amilTotalRiceKg,
+      totalFoodKg: 0,
+      zakatFitrahCash: zakatFitrahCashSplit.amilTotal,
+      zakatMalCash: zakatMalCashSplit.amilTotal,
+      fidyahCash: 0,
+      averageCashPerRecipient: floorAverage(amilTotalCash, safeAmilCount, 1),
+      averageRicePerRecipient: floorAverage(amilTotalRiceKg, safeAmilCount, 100),
+      averageFoodPerRecipient: 0,
+    },
+    nonAmil: {
+      recipientCount: safeNonAmilCount,
+      totalCash: nonAmilTotalCash,
+      totalRiceKg: nonAmilTotalRiceKg,
+      totalFoodKg: nonAmilTotalFoodKg,
+      zakatFitrahCash: zakatFitrahCashSplit.nonAmilTotal,
+      zakatMalCash: zakatMalCashSplit.nonAmilTotal,
+      fidyahCash: Math.max(0, totals.fidyahCash),
+      averageCashPerRecipient: floorAverage(nonAmilTotalCash, safeNonAmilCount, 1),
+      averageRicePerRecipient: floorAverage(nonAmilTotalRiceKg, safeNonAmilCount, 100),
+      averageFoodPerRecipient: floorAverage(nonAmilTotalFoodKg, safeNonAmilCount, 100),
+    },
+  };
+};
+
+const applyPackagingRecipientCountOverrides = (
+  summary: PackagingSummary,
+  overrides: PackagingRecipientCountOverrides,
+  options: Omit<PackagingGroupBreakdownOptions, "amilCount" | "nonAmilCount">,
+): PackagingSummary => {
+  const amilCount = clampRecipientCount(overrides.amilCount);
+  const nonAmilCount = clampRecipientCount(overrides.nonAmilCount);
+
+  return {
+    ...summary,
+    groupBreakdown: buildPackagingGroupBreakdown({
+      amilCount,
+      nonAmilCount,
+      ...options,
+    }),
+  };
+};
 
 const buildPackagingSummary = (
   items: PackagingSourceItem[],
@@ -368,6 +523,88 @@ const buildPackagingSummary = (
   };
 };
 
+const StatTile = ({
+  label,
+  value,
+  hint,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  className?: string;
+}) => (
+  <div className={`rounded-xl border border-border/60 bg-background/70 p-3 ${className}`}>
+    <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+    <p className="mt-1 text-lg font-semibold tabular-nums leading-tight">{value}</p>
+    {hint && <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">{hint}</p>}
+  </div>
+);
+
+const PackagingGroupCard = ({
+  title,
+  caption,
+  tone,
+  group,
+  showFood,
+  sources,
+}: {
+  title: string;
+  caption: string;
+  tone: "amil" | "nonAmil";
+  group: PackagingGroupSummary;
+  showFood: boolean;
+  sources: { label: string; value: string }[];
+}) => {
+  const palette =
+    tone === "amil"
+      ? { card: "border-emerald-200/70 bg-emerald-50/40", badge: "bg-emerald-600 text-white", text: "text-emerald-700" }
+      : { card: "border-sky-200/70 bg-sky-50/40", badge: "bg-sky-600 text-white", text: "text-sky-700" };
+
+  return (
+    <div className={`rounded-2xl border p-4 ${palette.card}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold">{title}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{caption}</p>
+        </div>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${palette.badge}`}>
+          {group.recipientCount} orang
+        </span>
+      </div>
+
+      <div className={`mt-3 grid gap-2 ${showFood ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+        <StatTile
+          label="Uang / orang"
+          value={formatCurrency(group.averageCashPerRecipient)}
+          hint={`Total ${formatCurrency(group.totalCash)}`}
+        />
+        <StatTile
+          label="Beras / orang"
+          value={`${group.averageRicePerRecipient.toFixed(2)} kg`}
+          hint={`Total ${group.totalRiceKg.toFixed(2)} kg`}
+        />
+        {showFood && (
+          <StatTile
+            label="Makanan / orang"
+            value={`${group.averageFoodPerRecipient.toFixed(2)} kg`}
+            hint={`Total ${group.totalFoodKg.toFixed(2)} kg`}
+          />
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+        <span className={`font-medium ${palette.text}`}>Sumber uang</span>
+        {sources.map((source) => (
+          <span key={source.label} className="tabular-nums">
+            {source.label} {source.value}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export default function Calculations() {
   const { selectedPeriod, isReadOnly } = usePeriod();
   const { getLabel } = useAsnafSettings();
@@ -377,8 +614,12 @@ export default function Calculations() {
   const [amilDistributionMode, setAmilDistributionMode] = useState<AmilDistributionMode>("percentage");
   const [amilShareFactor, setAmilShareFactor] = useState(0.5);
   const [batchNotes, setBatchNotes] = useState("");
+  const [activeTab, setActiveTab] = useState<"paket" | "batch" | "riwayat">("paket");
+  const [isFormulaOpen, setIsFormulaOpen] = useState(false);
   const [isPackagingDetailOpen, setIsPackagingDetailOpen] = useState(false);
   const [packagingDetailTab, setPackagingDetailTab] = useState<"asnaf" | "mustahik">("asnaf");
+  const [packagingAmilCountInput, setPackagingAmilCountInput] = useState("0");
+  const [packagingNonAmilCountInput, setPackagingNonAmilCountInput] = useState("0");
 
   const periodMode = normalizeAmilMode(selectedPeriod?.amil_distribution_mode);
   const periodShareFactor = normalizeAmilShareFactor(selectedPeriod?.amil_share_factor);
@@ -413,22 +654,7 @@ export default function Calculations() {
     },
   });
 
-  const { data: inflowRows = [] } = useQuery({
-    queryKey: ["fund-inflow-for-batch", selectedPeriod?.id],
-    queryFn: async () => {
-      if (!selectedPeriod?.id) return [];
-
-      const { data, error } = await supabase
-        .from("fund_ledger")
-        .select("category, amount_cash, amount_rice_kg, amount_food_kg")
-        .eq("period_id", selectedPeriod.id)
-        .in("transaction_type", ["collection", "adjustment", "transfer_in"]);
-
-      if (error) throw error;
-      return data as FundLedgerRow[];
-    },
-    enabled: !!selectedPeriod?.id,
-  });
+  const { data: periodSummary } = usePeriodSummary(selectedPeriod?.id || null);
 
   const { data: lockedBatchItems = [] } = useQuery({
     queryKey: ["distribution-batch-items-for-lock-balance", selectedPeriod?.id],
@@ -465,20 +691,22 @@ export default function Calculations() {
     enabled: !!selectedPeriod?.id,
   });
 
-  const inflowBalanceMap = useMemo(() => {
+  const receivedBalanceMap = useMemo(() => {
     const map = createEmptyBalanceMap();
+    const fitrahCash = map.get("zakat_fitrah_cash");
+    const fitrahRice = map.get("zakat_fitrah_rice");
+    const zakatMal = map.get("zakat_mal");
+    const fidyahCash = map.get("fidyah_cash");
+    const fidyahFood = map.get("fidyah_food");
 
-    inflowRows.forEach((row) => {
-      const current = map.get(row.category);
-      if (!current) return;
-
-      current.total_cash += Math.max(0, Number(row.amount_cash || 0));
-      current.total_rice_kg += Math.max(0, Number(row.amount_rice_kg || 0));
-      current.total_food_kg += Math.max(0, Number(row.amount_food_kg || 0));
-    });
+    if (fitrahCash) fitrahCash.total_cash = Math.max(0, Number(periodSummary?.zakat_fitrah_cash || 0));
+    if (fitrahRice) fitrahRice.total_rice_kg = Math.max(0, Number(periodSummary?.zakat_fitrah_rice_kg || 0));
+    if (zakatMal) zakatMal.total_cash = Math.max(0, Number(periodSummary?.zakat_mal || 0));
+    if (fidyahCash) fidyahCash.total_cash = Math.max(0, Number(periodSummary?.fidyah_cash || 0));
+    if (fidyahFood) fidyahFood.total_food_kg = Math.max(0, Number(periodSummary?.fidyah_food_kg || 0));
 
     return map;
-  }, [inflowRows]);
+  }, [periodSummary]);
 
   const lockedBalanceMap = useMemo(() => {
     const map = createEmptyBalanceMap();
@@ -499,7 +727,7 @@ export default function Calculations() {
 
   const availableForNextBatch = useMemo(() => {
     return FUND_CATEGORIES.map((category) => {
-      const inflow = inflowBalanceMap.get(category) || {
+      const inflow = receivedBalanceMap.get(category) || {
         category,
         total_cash: 0,
         total_rice_kg: 0,
@@ -519,9 +747,50 @@ export default function Calculations() {
         total_food_kg: Math.max(0, inflow.total_food_kg - locked.total_food_kg),
       };
     });
-  }, [inflowBalanceMap, lockedBalanceMap]);
+  }, [receivedBalanceMap, lockedBalanceMap]);
+
+  const overallAvailableBalances = useMemo(() => {
+    return [
+      {
+        category: "zakat_fitrah_cash" as FundCategory,
+        total_cash: Math.max(0, Number(periodSummary?.zakat_fitrah_cash || 0)),
+        total_rice_kg: 0,
+        total_food_kg: 0,
+      },
+      {
+        category: "zakat_fitrah_rice" as FundCategory,
+        total_cash: 0,
+        total_rice_kg: Math.max(0, Number(periodSummary?.zakat_fitrah_rice_kg || 0)),
+        total_food_kg: 0,
+      },
+      {
+        category: "zakat_mal" as FundCategory,
+        total_cash: Math.max(0, Number(periodSummary?.zakat_mal || 0)),
+        total_rice_kg: 0,
+        total_food_kg: 0,
+      },
+      {
+        category: "fidyah_cash" as FundCategory,
+        total_cash: Math.max(0, Number(periodSummary?.fidyah_cash || 0)),
+        total_rice_kg: 0,
+        total_food_kg: 0,
+      },
+      {
+        category: "fidyah_food" as FundCategory,
+        total_cash: 0,
+        total_rice_kg: 0,
+        total_food_kg: Math.max(0, Number(periodSummary?.fidyah_food_kg || 0)),
+      },
+    ];
+  }, [periodSummary]);
 
   const calculations = useDistributionCalculation(mustahikList, availableForNextBatch, [], {
+    amilDistributionMode,
+    amilShareFactor,
+    excludeExistingDistributed: false,
+  });
+
+  const overallCalculations = useDistributionCalculation(mustahikList, overallAvailableBalances, [], {
     amilDistributionMode,
     amilShareFactor,
     excludeExistingDistributed: false,
@@ -544,7 +813,7 @@ export default function Calculations() {
         total_rice_kg: 0,
         total_food_kg: 0,
       };
-      const inflow = inflowBalanceMap.get(category) || { total_cash: 0, total_rice_kg: 0, total_food_kg: 0 };
+      const inflow = receivedBalanceMap.get(category) || { total_cash: 0, total_rice_kg: 0, total_food_kg: 0 };
       const locked = lockedBalanceMap.get(category) || { total_cash: 0, total_rice_kg: 0, total_food_kg: 0 };
 
       const availableValue =
@@ -575,51 +844,76 @@ export default function Calculations() {
         mustahikRecipients: summary.beneficiaries.length,
       };
     });
-  }, [calculations, availableForNextBatch, inflowBalanceMap, lockedBalanceMap]);
+  }, [calculations, availableForNextBatch, receivedBalanceMap, lockedBalanceMap]);
 
-  const totalAvailableCash = useMemo(
-    () => availableForNextBatch.reduce((sum, item) => sum + Number(item.total_cash || 0), 0),
+  // Nilai yang benar-benar akan tersimpan saat batch dikunci (hasil alokasi, bukan sekadar saldo tersedia).
+  const allocationTotals = useMemo(
+    () =>
+      categorySummaries.reduce(
+        (acc, item) => {
+          if (item.meta.unit === "cash") acc.cash += item.allocatedValue;
+          else if (item.meta.unit === "rice") acc.rice += item.allocatedValue;
+          else acc.food += item.allocatedValue;
+          return acc;
+        },
+        { cash: 0, rice: 0, food: 0 },
+      ),
+    [categorySummaries],
+  );
+
+  const availableTotals = useMemo(
+    () =>
+      availableForNextBatch.reduce(
+        (acc, item) => {
+          acc.cash += Number(item.total_cash || 0);
+          acc.rice += Number(item.total_rice_kg || 0);
+          acc.food += Number(item.total_food_kg || 0);
+          return acc;
+        },
+        { cash: 0, rice: 0, food: 0 },
+      ),
     [availableForNextBatch],
   );
 
-  const totalAvailableRice = useMemo(
-    () => availableForNextBatch.reduce((sum, item) => sum + Number(item.total_rice_kg || 0), 0),
-    [availableForNextBatch],
-  );
-
-  const totalAvailableFood = useMemo(
-    () => availableForNextBatch.reduce((sum, item) => sum + Number(item.total_food_kg || 0), 0),
-    [availableForNextBatch],
-  );
+  const hasAllocationToLock = allocationTotals.cash + allocationTotals.rice + allocationTotals.food > 0;
+  const unallocatedCategories = categorySummaries.filter((item) => item.availableValue - item.allocatedValue > 0.005);
 
   const amilCount = calculations.amilList.length;
   const beneficiaryCount = calculations.beneficiaryList.length;
   const totalRecipients = amilCount + beneficiaryCount;
   const amilPercentage = calculations.configuration.amilPercentage;
   const baseAmilRatio = totalRecipients > 0 ? amilCount / totalRecipients : 0;
+  const rawAmilShare = amilDistributionMode === "percentage" ? amilPercentage : baseAmilRatio * amilShareFactor;
+  // Sama seperti mesin hitung: tanpa amil porsinya 0, tanpa non-amil seluruhnya ke amil, selain itu dibatasi 50%.
   const effectiveAmilShare =
-    amilDistributionMode === "percentage" ? amilPercentage : baseAmilRatio * amilShareFactor;
+    amilCount === 0 ? 0 : beneficiaryCount === 0 ? 1 : Math.min(0.5, rawAmilShare);
 
-  const sampleCash = 1_000_000;
-  const sampleRiceKg = 100;
-  const sampleAmilCash = Math.round(sampleCash * effectiveAmilShare);
-  const sampleBeneficiaryCash = sampleCash - sampleAmilCash;
-  const sampleAmilRice = Number((sampleRiceKg * effectiveAmilShare).toFixed(2));
-  const sampleBeneficiaryRice = Number((sampleRiceKg - sampleAmilRice).toFixed(2));
-  const sampleCashPerAmil = amilCount > 0 ? Math.floor(sampleAmilCash / amilCount) : 0;
-  const sampleRicePerAmil = amilCount > 0 ? Number((sampleAmilRice / amilCount).toFixed(2)) : 0;
+  const SIM_CASH = 1_000_000;
+  const SIM_RICE = 100;
+  const simAmilCash = Math.round(SIM_CASH * effectiveAmilShare);
+  const simNonAmilCash = SIM_CASH - simAmilCash;
+  const simAmilRice = Number((SIM_RICE * effectiveAmilShare).toFixed(2));
+  const simNonAmilRice = Number((SIM_RICE - simAmilRice).toFixed(2));
+  const simCashPerAmil = amilCount > 0 ? Math.floor(simAmilCash / amilCount) : 0;
+  const simRicePerAmil = amilCount > 0 ? Number((simAmilRice / amilCount).toFixed(2)) : 0;
 
-  // Fixed scenario example for easier field explanation.
-  const demoAmilCount = 10;
-  const demoBeneficiaryCount = 10;
-  const demoRecipientTotal = demoAmilCount + demoBeneficiaryCount;
-  const demoBaseAmilRatio = demoRecipientTotal > 0 ? demoAmilCount / demoRecipientTotal : 0;
-  const demoPercentageShare = amilPercentage;
-  const demoProportionalShare = demoBaseAmilRatio * amilShareFactor;
-  const demoPercentageCash = Math.round(sampleCash * demoPercentageShare);
-  const demoProportionalCash = Math.round(sampleCash * demoProportionalShare);
-  const demoPercentageRice = Number((sampleRiceKg * demoPercentageShare).toFixed(2));
-  const demoProportionalRice = Number((sampleRiceKg * demoProportionalShare).toFixed(2));
+  const defaultPackagingAmilCount = overallCalculations.amilList.length;
+  const defaultPackagingNonAmilCount = overallCalculations.beneficiaryList.length;
+
+  useEffect(() => {
+    setPackagingAmilCountInput(
+      String(selectedPeriod?.packaging_amil_count_override ?? defaultPackagingAmilCount),
+    );
+    setPackagingNonAmilCountInput(
+      String(selectedPeriod?.packaging_non_amil_count_override ?? defaultPackagingNonAmilCount),
+    );
+  }, [
+    selectedPeriod?.id,
+    selectedPeriod?.packaging_amil_count_override,
+    selectedPeriod?.packaging_non_amil_count_override,
+    defaultPackagingAmilCount,
+    defaultPackagingNonAmilCount,
+  ]);
 
   const mustahikMetaMap = useMemo(
     () =>
@@ -639,11 +933,11 @@ export default function Calculations() {
     [mustahikList],
   );
 
-  const overallPackagingSummary = useMemo(() => {
+  const baseOverallPackagingSummary = useMemo(() => {
     const overallItems: PackagingSourceItem[] = [];
     const pushRecipients = (
       fundCategory: FundCategory,
-      recipients: typeof calculations.zakatFitrahCash.amil,
+      recipients: typeof overallCalculations.zakatFitrahCash.amil,
       isAmil: boolean,
     ) => {
       recipients.forEach((recipient) => {
@@ -661,19 +955,70 @@ export default function Calculations() {
       });
     };
 
-    pushRecipients("zakat_fitrah_cash", calculations.zakatFitrahCash.amil, true);
-    pushRecipients("zakat_fitrah_cash", calculations.zakatFitrahCash.beneficiaries, false);
-    pushRecipients("zakat_fitrah_rice", calculations.zakatFitrahRice.amil, true);
-    pushRecipients("zakat_fitrah_rice", calculations.zakatFitrahRice.beneficiaries, false);
-    pushRecipients("zakat_mal", calculations.zakatMal.amil, true);
-    pushRecipients("zakat_mal", calculations.zakatMal.beneficiaries, false);
-    pushRecipients("fidyah_cash", calculations.fidyahCash.amil, true);
-    pushRecipients("fidyah_cash", calculations.fidyahCash.beneficiaries, false);
-    pushRecipients("fidyah_food", calculations.fidyahFood.amil, true);
-    pushRecipients("fidyah_food", calculations.fidyahFood.beneficiaries, false);
+    pushRecipients("zakat_fitrah_cash", overallCalculations.zakatFitrahCash.amil, true);
+    pushRecipients("zakat_fitrah_cash", overallCalculations.zakatFitrahCash.beneficiaries, false);
+    pushRecipients("zakat_fitrah_rice", overallCalculations.zakatFitrahRice.amil, true);
+    pushRecipients("zakat_fitrah_rice", overallCalculations.zakatFitrahRice.beneficiaries, false);
+    pushRecipients("zakat_mal", overallCalculations.zakatMal.amil, true);
+    pushRecipients("zakat_mal", overallCalculations.zakatMal.beneficiaries, false);
+    pushRecipients("fidyah_cash", overallCalculations.fidyahCash.amil, true);
+    pushRecipients("fidyah_cash", overallCalculations.fidyahCash.beneficiaries, false);
+    pushRecipients("fidyah_food", overallCalculations.fidyahFood.amil, true);
+    pushRecipients("fidyah_food", overallCalculations.fidyahFood.beneficiaries, false);
 
     return buildPackagingSummary(overallItems, mustahikMetaMap);
-  }, [calculations, mustahikMetaMap]);
+  }, [mustahikMetaMap, overallCalculations]);
+
+  const parsedPackagingAmilCount = clampRecipientCount(Number(packagingAmilCountInput || 0));
+  const parsedPackagingNonAmilCount = clampRecipientCount(Number(packagingNonAmilCountInput || 0));
+
+  const hasPackagingCountOverride =
+    selectedPeriod?.packaging_amil_count_override !== null ||
+    selectedPeriod?.packaging_non_amil_count_override !== null;
+
+  const isPackagingCountChanged =
+    parsedPackagingAmilCount !== (selectedPeriod?.packaging_amil_count_override ?? defaultPackagingAmilCount) ||
+    parsedPackagingNonAmilCount !== (selectedPeriod?.packaging_non_amil_count_override ?? defaultPackagingNonAmilCount);
+
+  const overallPackagingTotals = useMemo(
+    () => ({
+      totalCash: Number(periodSummary?.total_combined_cash || 0),
+      zakatFitrahCash: Number(periodSummary?.zakat_fitrah_cash || 0),
+      zakatMalCash: Number(periodSummary?.zakat_mal || 0),
+      fidyahCash: Number(periodSummary?.fidyah_cash || 0),
+      totalRiceKg: Number(periodSummary?.zakat_fitrah_rice_kg || 0),
+      totalFoodKg: Number(periodSummary?.fidyah_food_kg || 0),
+    }),
+    [periodSummary],
+  );
+
+  const overallPackagingSummary = useMemo(
+    () =>
+      applyPackagingRecipientCountOverrides(baseOverallPackagingSummary, {
+        amilCount: parsedPackagingAmilCount,
+        nonAmilCount: parsedPackagingNonAmilCount,
+      }, {
+        totals: overallPackagingTotals,
+        amilDistributionMode,
+        amilShareFactor,
+        amilPercentage,
+      }),
+    [
+      baseOverallPackagingSummary,
+      parsedPackagingAmilCount,
+      parsedPackagingNonAmilCount,
+      overallPackagingTotals,
+      amilDistributionMode,
+      amilShareFactor,
+      amilPercentage,
+    ],
+  );
+
+  const hasPeriodFunds =
+    overallPackagingSummary.recipients.length > 0 ||
+    overallPackagingTotals.totalCash > 0 ||
+    overallPackagingTotals.totalRiceKg > 0 ||
+    overallPackagingTotals.totalFoodKg > 0;
 
   const saveDistributionConfigMutation = useMutation({
     mutationFn: async () => {
@@ -695,6 +1040,34 @@ export default function Calculations() {
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Gagal menyimpan konfigurasi", description: error.message });
+    },
+  });
+
+  const savePackagingCountMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedPeriod?.id) throw new Error("Periode belum dipilih");
+
+      const packagingAmilValue =
+        parsedPackagingAmilCount === defaultPackagingAmilCount ? null : parsedPackagingAmilCount;
+      const packagingNonAmilValue =
+        parsedPackagingNonAmilCount === defaultPackagingNonAmilCount ? null : parsedPackagingNonAmilCount;
+
+      const { error } = await supabase
+        .from("periods")
+        .update({
+          packaging_amil_count_override: packagingAmilValue,
+          packaging_non_amil_count_override: packagingNonAmilValue,
+        })
+        .eq("id", selectedPeriod.id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["periods"] });
+      toast({ title: "Jumlah pembungkusan berhasil disimpan" });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Gagal menyimpan jumlah pembungkusan", description: error.message });
     },
   });
 
@@ -825,643 +1198,590 @@ export default function Calculations() {
     <AppLayout title="Perhitungan Zakat & Fidyah">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
-      <div className="space-y-5">
-        <Card className="overflow-hidden border-none bg-gradient-to-br from-emerald-500 via-cyan-500 to-sky-500 text-white shadow-xl">
-          <CardContent className="p-6 md:p-8">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-              <div className="space-y-2">
-                <div className="inline-flex items-center gap-2 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold tracking-wide">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  SNAPSHOT + LOCK BATCH
-                </div>
-                <h2 className="text-2xl font-semibold md:text-3xl">Kunci hasil perhitungan tanpa menunggu penerimaan selesai</h2>
-                <p className="max-w-2xl text-sm text-white/90 md:text-base">
-                  Dana baru setelah batch dikunci akan otomatis masuk ke batch berikutnya. Panitia bisa langsung menyalurkan batch yang sudah dikunci.
-                </p>
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <Badge variant="secondary" className="bg-white/25 text-white hover:bg-white/25">
-                    Periode: {selectedPeriod?.name || "-"}
-                  </Badge>
-                  <Badge variant="secondary" className="bg-white/25 text-white hover:bg-white/25">
-                    Mode: {amilDistributionMode === "percentage" ? "Persentase Tetap" : "Rasio x Faktor"}
-                  </Badge>
-                </div>
+      <div className="space-y-4">
+        {/* Ringkasan dana periode aktif */}
+        <section className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-[220px]">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Dana masuk · {selectedPeriod?.name || "Periode belum dipilih"}
+              </p>
+              <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">
+                {formatCurrency(overallPackagingTotals.totalCash)}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                ZF {formatCurrency(overallPackagingTotals.zakatFitrahCash)} · ZM{" "}
+                {formatCurrency(overallPackagingTotals.zakatMalCash)} · Fidyah{" "}
+                {formatCurrency(overallPackagingTotals.fidyahCash)}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+                <p className="text-[11px] text-muted-foreground">Beras zakat</p>
+                <p className="text-base font-semibold tabular-nums">{overallPackagingTotals.totalRiceKg.toFixed(2)} kg</p>
               </div>
-              <Button asChild variant="secondary" className="w-full bg-white text-sky-700 hover:bg-white/90 md:w-auto">
+              <div className="rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+                <p className="text-[11px] text-muted-foreground">Makanan fidyah</p>
+                <p className="text-base font-semibold tabular-nums">{overallPackagingTotals.totalFoodKg.toFixed(2)} kg</p>
+              </div>
+              <Button asChild variant="outline" className="h-[52px] rounded-xl">
                 <Link href="/distribution">
-                  Buka Pendistribusian
-                  <ArrowRight className="h-4 w-4" />
+                  Pendistribusian
+                  <ArrowRight className="ml-1 h-4 w-4" />
                 </Link>
               </Button>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Konfigurasi Porsi Amil per Periode</CardTitle>
-            <CardDescription>
-              Pengaturan ini tersimpan di periode aktif dan dipakai untuk seluruh perhitungan batch.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-3">
-            <div className="space-y-2 md:col-span-2">
-              <p className="text-xs text-muted-foreground">Metode alokasi amil</p>
-              <Select
-                value={amilDistributionMode}
-                onValueChange={(value) => setAmilDistributionMode(value as AmilDistributionMode)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="percentage">
-                    Persentase Tetap Amil ({(calculations.configuration.amilPercentage * 100).toFixed(1)}%)
-                  </SelectItem>
-                  <SelectItem value="proportional_with_factor">Rasio Jumlah Penerima x Faktor</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">Faktor amil (0 - 1)</p>
-              <Input
-                type="number"
-                min={0}
-                max={1}
-                step={0.05}
-                value={amilShareFactor}
-                disabled={amilDistributionMode !== "proportional_with_factor"}
-                onChange={(e) => {
-                  const raw = Number(e.target.value);
-                  if (Number.isNaN(raw)) {
-                    setAmilShareFactor(0);
-                    return;
-                  }
-                  setAmilShareFactor(Math.max(0, Math.min(1, raw)));
-                }}
-              />
-            </div>
-
-            <div className="md:col-span-3">
-              <Alert className="border-primary/20 bg-primary/5">
-                <Info className="h-4 w-4" />
-                <AlertTitle>
-                  {amilDistributionMode === "percentage"
-                    ? "Metode: Persentase Tetap Amil"
-                    : "Metode: Rasio Jumlah Penerima x Faktor"}
-                </AlertTitle>
-                <AlertDescription className="space-y-2 text-xs sm:text-sm">
-                  {amilDistributionMode === "percentage" ? (
-                    <>
-                      <p>
-                        Rumus: <span className="font-medium">Porsi Amil = Total Dana x {(amilPercentage * 100).toFixed(1)}%</span>.
-                        Sisa dana dialokasikan ke mustahik non-amil.
-                      </p>
-                      <p>
-                        Simulasi: jika total kas <span className="font-medium">{formatCurrency(sampleCash)}</span>, maka amil menerima{" "}
-                        <span className="font-medium">{formatCurrency(sampleAmilCash)}</span> dan non-amil menerima{" "}
-                        <span className="font-medium">{formatCurrency(sampleBeneficiaryCash)}</span>.
-                      </p>
-                      <p>
-                        Simulasi beras: dari <span className="font-medium">{sampleRiceKg.toFixed(0)} kg</span>, porsi amil{" "}
-                        <span className="font-medium">{sampleAmilRice.toFixed(2)} kg</span> dan non-amil{" "}
-                        <span className="font-medium">{sampleBeneficiaryRice.toFixed(2)} kg</span>.
-                      </p>
-                      <p>
-                        Contoh mudah (amil 10, non-amil 10): karena metode ini tetap {(amilPercentage * 100).toFixed(1)}%,
-                        maka dari <span className="font-medium">{formatCurrency(sampleCash)}</span> amil menerima{" "}
-                        <span className="font-medium">{formatCurrency(demoPercentageCash)}</span> (≈{" "}
-                        {formatCurrency(Math.floor(demoPercentageCash / demoAmilCount))}/amil) dan dari{" "}
-                        <span className="font-medium">{sampleRiceKg} kg</span> amil menerima{" "}
-                        <span className="font-medium">{demoPercentageRice.toFixed(2)} kg</span>.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p>
-                        Rumus dasar: <span className="font-medium">Rasio Amil = Jumlah Amil / (Jumlah Amil + Jumlah Non-Amil)</span>.
-                        Porsi akhir amil = Total Dana x Rasio Amil x Faktor.
-                      </p>
-                      <p>
-                        Kondisi saat ini: {amilCount} amil, {beneficiaryCount} non-amil, rasio amil{" "}
-                        <span className="font-medium">{(baseAmilRatio * 100).toFixed(2)}%</span>, faktor{" "}
-                        <span className="font-medium">{amilShareFactor.toFixed(2)}</span>, sehingga porsi amil efektif{" "}
-                        <span className="font-medium">{(effectiveAmilShare * 100).toFixed(2)}%</span>.
-                      </p>
-                      <p>
-                        Simulasi: jika total kas <span className="font-medium">{formatCurrency(sampleCash)}</span>, amil menerima{" "}
-                        <span className="font-medium">{formatCurrency(sampleAmilCash)}</span> dan non-amil menerima{" "}
-                        <span className="font-medium">{formatCurrency(sampleBeneficiaryCash)}</span>.
-                      </p>
-                      <p>
-                        Simulasi beras: dari <span className="font-medium">{sampleRiceKg.toFixed(0)} kg</span>, porsi amil{" "}
-                        <span className="font-medium">{sampleAmilRice.toFixed(2)} kg</span> dan non-amil{" "}
-                        <span className="font-medium">{sampleBeneficiaryRice.toFixed(2)} kg</span>.
-                      </p>
-                      <p>
-                        Contoh mudah (amil 10, non-amil 10): rasio amil = 10/(10+10) = 50%. Dengan faktor{" "}
-                        <span className="font-medium">{amilShareFactor.toFixed(2)}</span>, porsi amil jadi{" "}
-                        <span className="font-medium">{(demoProportionalShare * 100).toFixed(2)}%</span>.
-                        Dari <span className="font-medium">{formatCurrency(sampleCash)}</span> amil menerima{" "}
-                        <span className="font-medium">{formatCurrency(demoProportionalCash)}</span> (≈{" "}
-                        {formatCurrency(Math.floor(demoProportionalCash / demoAmilCount))}/amil) dan dari{" "}
-                        <span className="font-medium">{sampleRiceKg} kg</span> amil menerima{" "}
-                        <span className="font-medium">{demoProportionalRice.toFixed(2)} kg</span>.
-                      </p>
-                    </>
-                  )}
-                  <p>
-                    Perkiraan per amil: sekitar <span className="font-medium">{formatCurrency(sampleCashPerAmil)}</span> kas dan{" "}
-                    <span className="font-medium">{sampleRicePerAmil.toFixed(2)} kg</span> beras per orang amil (simulasi, sebelum pembulatan akhir).
-                  </p>
-                  <p className="text-muted-foreground">
-                    Catatan: Fidyah (uang/makanan) pada sistem ini tidak dialokasikan untuk amil, seluruhnya dibagikan ke mustahik yang berhak.
-                  </p>
-                </AlertDescription>
-              </Alert>
-            </div>
-
-            <div className="md:col-span-3 flex justify-end">
-              <Button
-                onClick={() => saveDistributionConfigMutation.mutate()}
-                disabled={!selectedPeriod?.id || isReadOnly || !isConfigChanged || saveDistributionConfigMutation.isPending}
-              >
-                Simpan Konfigurasi Periode
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-primary/30">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Lock className="h-4 w-4" />
-              Kunci Batch Perhitungan Saat Ini
-            </CardTitle>
-            <CardDescription>
-              Snapshot ini akan disimpan permanen. Dana yang sudah terkunci tidak akan ikut perhitungan batch berikutnya.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-lg border bg-muted/20 p-3">
-                <p className="text-xs text-muted-foreground">Tersedia Kas untuk Batch Baru</p>
-                <p className="text-lg font-semibold">{formatCurrency(totalAvailableCash)}</p>
-              </div>
-              <div className="rounded-lg border bg-muted/20 p-3">
-                <p className="text-xs text-muted-foreground">Tersedia Beras untuk Batch Baru</p>
-                <p className="text-lg font-semibold">{totalAvailableRice.toFixed(2)} kg</p>
-              </div>
-              <div className="rounded-lg border bg-muted/20 p-3">
-                <p className="text-xs text-muted-foreground">Tersedia Fidyah Makanan untuk Batch Baru</p>
-                <p className="text-lg font-semibold">{totalAvailableFood.toFixed(2)} kg</p>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">Catatan batch (opsional)</p>
-              <Textarea
-                placeholder="Contoh: Batch penyaluran pekan 2 Ramadhan"
-                value={batchNotes}
-                onChange={(e) => setBatchNotes(e.target.value)}
-              />
-            </div>
-
-            <div className="flex justify-end">
-              <Button
-                onClick={() => lockCalculationBatchMutation.mutate()}
-                disabled={!selectedPeriod?.id || isReadOnly || lockCalculationBatchMutation.isPending}
-              >
-                {lockCalculationBatchMutation.isPending ? "Mengunci..." : "Kunci Batch Perhitungan"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {overallPackagingSummary.recipients.length > 0 && (
-          <Card className="border-emerald-200/70 bg-gradient-to-br from-emerald-50/80 via-background to-sky-50/40">
-            <CardHeader className="pb-3">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <CardTitle className="text-base">Ringkasan Pembungkusan Total Keseluruhan</CardTitle>
-                  <CardDescription>
-                    Menghitung seluruh saldo distribusi aktif periode ini. Cocok dipakai saat pembagian dilakukan tanpa batch lock.
-                  </CardDescription>
-                </div>
-                <Badge variant="outline" className="w-fit rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700">
-                  Total periode aktif
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-                <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Total Uang</p>
-                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingSummary.totals.totalCash)}</p>
-                </div>
-                <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">ZF Uang</p>
-                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingSummary.totals.zakatFitrahCash)}</p>
-                </div>
-                <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Zakat Mal</p>
-                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingSummary.totals.zakatMalCash)}</p>
-                </div>
-                <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Fidyah Uang</p>
-                  <p className="mt-1 text-base font-semibold">{formatCurrency(overallPackagingSummary.totals.fidyahCash)}</p>
-                </div>
-                <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Beras Zakat</p>
-                  <p className="mt-1 text-base font-semibold">{overallPackagingSummary.totals.totalRiceKg.toFixed(2)} kg</p>
-                </div>
-                <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Makanan Fidyah</p>
-                  <p className="mt-1 text-base font-semibold">{overallPackagingSummary.totals.totalFoodKg.toFixed(2)} kg</p>
-                </div>
-              </div>
-
-              <div className="grid gap-3 xl:grid-cols-2">
-                <div className="rounded-3xl border border-emerald-200/70 bg-emerald-50/80 p-4 shadow-sm">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-emerald-950">Amil</p>
-                      <p className="text-xs text-emerald-800/80">Estimasi paket per orang amil dari total keseluruhan.</p>
-                    </div>
-                    <Badge className="rounded-full bg-emerald-600">{overallPackagingSummary.groupBreakdown.amil.recipientCount} orang</Badge>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-emerald-200/70 bg-white/80 p-3">
-                      <p className="text-xs text-muted-foreground">Uang per orang</p>
-                      <p className="mt-1 text-lg font-semibold">{formatCurrency(overallPackagingSummary.groupBreakdown.amil.averageCashPerRecipient)}</p>
-                      <p className="text-[11px] text-muted-foreground">Total: {formatCurrency(overallPackagingSummary.groupBreakdown.amil.totalCash)}</p>
-                    </div>
-                    <div className="rounded-2xl border border-emerald-200/70 bg-white/80 p-3">
-                      <p className="text-xs text-muted-foreground">Beras per orang</p>
-                      <p className="mt-1 text-lg font-semibold">{overallPackagingSummary.groupBreakdown.amil.averageRicePerRecipient.toFixed(2)} kg</p>
-                      <p className="text-[11px] text-muted-foreground">Total: {overallPackagingSummary.groupBreakdown.amil.totalRiceKg.toFixed(2)} kg</p>
-                    </div>
-                    <div className="rounded-2xl border border-emerald-200/70 bg-white/80 p-3">
-                      <p className="text-xs text-muted-foreground">Fidyah makanan per orang</p>
-                      <p className="mt-1 text-lg font-semibold">{overallPackagingSummary.groupBreakdown.amil.averageFoodPerRecipient.toFixed(2)} kg</p>
-                      <p className="text-[11px] text-muted-foreground">Total: {overallPackagingSummary.groupBreakdown.amil.totalFoodKg.toFixed(2)} kg</p>
-                    </div>
-                    <div className="rounded-2xl border border-emerald-200/70 bg-white/80 p-3">
-                      <p className="text-xs text-muted-foreground">Detail uang</p>
-                      <p className="mt-1 text-sm font-semibold leading-6">
-                        ZF {formatCurrency(overallPackagingSummary.groupBreakdown.amil.zakatFitrahCash)}
-                        <br />
-                        ZM {formatCurrency(overallPackagingSummary.groupBreakdown.amil.zakatMalCash)}
-                        <br />
-                        FD {formatCurrency(overallPackagingSummary.groupBreakdown.amil.fidyahCash)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-sky-200/70 bg-sky-50/80 p-4 shadow-sm">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-sky-950">Non-Amil</p>
-                      <p className="text-xs text-sky-800/80">Estimasi paket per orang mustahik non-amil dari total keseluruhan.</p>
-                    </div>
-                    <Badge variant="outline" className="rounded-full border-sky-300 bg-white/90 px-3 py-1 text-sky-700">
-                      {overallPackagingSummary.groupBreakdown.nonAmil.recipientCount} orang
-                    </Badge>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-sky-200/70 bg-white/80 p-3">
-                      <p className="text-xs text-muted-foreground">Uang per orang</p>
-                      <p className="mt-1 text-lg font-semibold">{formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.averageCashPerRecipient)}</p>
-                      <p className="text-[11px] text-muted-foreground">Total: {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.totalCash)}</p>
-                    </div>
-                    <div className="rounded-2xl border border-sky-200/70 bg-white/80 p-3">
-                      <p className="text-xs text-muted-foreground">Beras per orang</p>
-                      <p className="mt-1 text-lg font-semibold">{overallPackagingSummary.groupBreakdown.nonAmil.averageRicePerRecipient.toFixed(2)} kg</p>
-                      <p className="text-[11px] text-muted-foreground">Total: {overallPackagingSummary.groupBreakdown.nonAmil.totalRiceKg.toFixed(2)} kg</p>
-                    </div>
-                    <div className="rounded-2xl border border-sky-200/70 bg-white/80 p-3">
-                      <p className="text-xs text-muted-foreground">Fidyah makanan per orang</p>
-                      <p className="mt-1 text-lg font-semibold">{overallPackagingSummary.groupBreakdown.nonAmil.averageFoodPerRecipient.toFixed(2)} kg</p>
-                      <p className="text-[11px] text-muted-foreground">Total: {overallPackagingSummary.groupBreakdown.nonAmil.totalFoodKg.toFixed(2)} kg</p>
-                    </div>
-                    <div className="rounded-2xl border border-sky-200/70 bg-white/80 p-3">
-                      <p className="text-xs text-muted-foreground">Detail uang</p>
-                      <p className="mt-1 text-sm font-semibold leading-6">
-                        ZF {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.zakatFitrahCash)}
-                        <br />
-                        ZM {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.zakatMalCash)}
-                        <br />
-                        FD {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.fidyahCash)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2 rounded-2xl border border-border/70 bg-background/85 p-3 md:flex-row md:items-center md:justify-between">
-                <p className="text-xs text-muted-foreground">
-                  Ringkasan ini mengambil seluruh saldo distribusi yang masih tersedia pada periode aktif. Cocok untuk pembungkusan cepat saat tidak memakai batch.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setPackagingDetailTab("asnaf");
-                      setIsPackagingDetailOpen(true);
-                    }}
-                  >
-                    Detail Total per Golongan
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setPackagingDetailTab("mustahik");
-                      setIsPackagingDetailOpen(true);
-                    }}
-                  >
-                    Detail Total per Mustahik
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        <section className="space-y-3">
-          <div>
-            <h3 className="text-lg font-semibold">Ringkasan Dana untuk Batch Berikutnya</h3>
-            <p className="text-sm text-muted-foreground">
-              Sumber = dana masuk kumulatif, dikurangi semua dana yang sudah pernah dikunci batch.
-            </p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            {categorySummaries.map((item) => {
-              const Icon = item.meta.icon;
-              return (
-                <Card key={item.category} className="border-border/70">
-                  <CardHeader className="pb-2">
-                    <CardDescription className="flex items-center gap-2">
-                      <Icon className={`h-4 w-4 ${item.meta.accent}`} />
-                      {item.meta.label}
-                    </CardDescription>
-                    <CardTitle className="text-base">{toDisplayAmount(item.meta.unit, item.availableValue)}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-xs text-muted-foreground">
-                    <div className="flex items-center justify-between">
-                      <span>Dana masuk</span>
-                      <span className="font-medium text-foreground">{toDisplayAmount(item.meta.unit, item.inflowValue)}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Sudah dikunci</span>
-                      <span className="font-medium text-foreground">{toDisplayAmount(item.meta.unit, item.lockedValue)}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Alokasi batch ini</span>
-                      <span className="font-medium text-foreground">{toDisplayAmount(item.meta.unit, item.allocatedValue)}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Penerima</span>
-                      <span className="font-medium text-foreground">{item.totalRecipients}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
           </div>
         </section>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Riwayat Batch Perhitungan</CardTitle>
-            <CardDescription>
-              Batch yang sudah dikunci dapat langsung diproses di menu Pendistribusian.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {lockedBatches.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">Belum ada batch terkunci pada periode ini.</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Batch</TableHead>
-                    <TableHead>Tanggal Kunci</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Kas</TableHead>
-                    <TableHead className="text-right">Beras</TableHead>
-                    <TableHead className="text-right">Makanan</TableHead>
-                    <TableHead>Catatan</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {lockedBatches.map((batch) => (
-                    <TableRow key={batch.id}>
-                      <TableCell className="font-medium">{batch.batch_code || `BATCH-${batch.batch_no}`}</TableCell>
-                      <TableCell>
-                        {format(new Date(batch.locked_at), "dd MMM yyyy HH:mm", { locale: idLocale })}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={batch.status === "distributed" ? "default" : "outline"}>
-                          {BATCH_STATUS_LABELS[batch.status] || batch.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">{formatCurrency(batch.total_allocated_cash || 0)}</TableCell>
-                      <TableCell className="text-right">{(batch.total_allocated_rice_kg || 0).toFixed(2)} kg</TableCell>
-                      <TableCell className="text-right">{(batch.total_allocated_food_kg || 0).toFixed(2)} kg</TableCell>
-                      <TableCell className="text-muted-foreground">{batch.notes || "-"}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
+        {/* Konfigurasi porsi amil */}
+        <Card className="border-border/70">
+          <CardContent className="space-y-3 p-4 sm:p-5">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px_auto] md:items-end">
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Metode porsi amil</p>
+                <Select
+                  value={amilDistributionMode}
+                  onValueChange={(value) => setAmilDistributionMode(value as AmilDistributionMode)}
+                >
+                  <SelectTrigger className="h-10 rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="percentage">
+                      Persentase tetap ({(amilPercentage * 100).toFixed(1)}%)
+                    </SelectItem>
+                    <SelectItem value="proportional_with_factor">Rasio penerima × faktor</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Faktor (0 - 1)</p>
+                <Input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  className="h-10 rounded-xl tabular-nums"
+                  value={amilShareFactor}
+                  disabled={amilDistributionMode !== "proportional_with_factor"}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    if (Number.isNaN(raw)) {
+                      setAmilShareFactor(0);
+                      return;
+                    }
+                    setAmilShareFactor(Math.max(0, Math.min(1, raw)));
+                  }}
+                />
+              </div>
+
+              <Button
+                className="h-10 rounded-xl"
+                onClick={() => saveDistributionConfigMutation.mutate()}
+                disabled={!selectedPeriod?.id || isReadOnly || !isConfigChanged || saveDistributionConfigMutation.isPending}
+              >
+                {saveDistributionConfigMutation.isPending ? "Menyimpan..." : "Simpan"}
+              </Button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <Badge variant="secondary" className="rounded-full tabular-nums">
+                Porsi amil efektif {(effectiveAmilShare * 100).toFixed(2)}%
+              </Badge>
+              <Badge variant="outline" className="rounded-full tabular-nums">
+                {amilCount} amil · {beneficiaryCount} non-amil
+              </Badge>
+              {isConfigChanged && (
+                <Badge variant="outline" className="rounded-full border-amber-300 bg-amber-50 text-amber-700">
+                  Belum disimpan
+                </Badge>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto h-8 gap-1 rounded-full px-3 text-xs"
+                onClick={() => setIsFormulaOpen((open) => !open)}
+              >
+                <Info className="h-3.5 w-3.5" />
+                {isFormulaOpen ? "Tutup rumus" : "Lihat rumus"}
+              </Button>
+            </div>
+
+            <Collapsible open={isFormulaOpen} onOpenChange={setIsFormulaOpen}>
+              <CollapsibleContent>
+                <div className="grid gap-3 rounded-xl border border-border/60 bg-muted/20 p-3 lg:grid-cols-2">
+                  <ul className="space-y-1.5 text-xs leading-6 text-muted-foreground">
+                    {amilDistributionMode === "percentage" ? (
+                      <li>
+                        <span className="font-medium text-foreground">Porsi amil</span> = total dana ×{" "}
+                        {(amilPercentage * 100).toFixed(1)}% (dari pengaturan asnaf). Sisanya dibagi ke non-amil
+                        berdasarkan bobot prioritas dan jumlah anggota keluarga.
+                      </li>
+                    ) : (
+                      <li>
+                        <span className="font-medium text-foreground">Nilai dasar per penerima</span> = total dana ÷
+                        (jumlah amil + non-amil). <span className="font-medium text-foreground">Porsi per amil</span> =
+                        nilai dasar × faktor {amilShareFactor.toFixed(2)}. Sisa selisihnya kembali ke non-amil dan
+                        dibagi rata.
+                      </li>
+                    )}
+                    <li>Porsi amil dibatasi maksimal 50% dari dana kategori terkait.</li>
+                    <li>Fidyah uang dan fidyah makanan tidak dialokasikan ke amil.</li>
+                  </ul>
+
+                  <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                      Simulasi per {formatCurrency(SIM_CASH)} dan {SIM_RICE} kg
+                    </p>
+                    <div className="mt-2 space-y-1.5 text-xs tabular-nums">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Amil</span>
+                        <span className="font-medium">
+                          {formatCurrency(simAmilCash)} · {simAmilRice.toFixed(2)} kg
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Non-amil</span>
+                        <span className="font-medium">
+                          {formatCurrency(simNonAmilCash)} · {simNonAmilRice.toFixed(2)} kg
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-1.5">
+                        <span className="text-muted-foreground">Per orang amil</span>
+                        <span className="font-medium">
+                          {formatCurrency(simCashPerAmil)} · {simRicePerAmil.toFixed(2)} kg
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           </CardContent>
         </Card>
 
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
+          <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl p-1">
+            <TabsTrigger value="paket" className="rounded-lg">
+              Paket Pembungkusan
+            </TabsTrigger>
+            <TabsTrigger value="batch" className="rounded-lg">
+              Batch Baru
+            </TabsTrigger>
+            <TabsTrigger value="riwayat" className="rounded-lg">
+              Riwayat ({lockedBatches.length})
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Tab 1 - Paket pembungkusan total periode */}
+          <TabsContent value="paket" className="mt-3">
+            {hasPeriodFunds ? (
+              <Card className="border-border/70">
+                <CardHeader className="gap-3 pb-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-base">Paket dari total dana periode</CardTitle>
+                      <CardDescription>
+                        Estimasi isi paket per orang memakai seluruh penerimaan periode aktif, tanpa menunggu batch.
+                      </CardDescription>
+                    </div>
+                    {hasPackagingCountOverride && (
+                      <Badge variant="outline" className="rounded-full border-amber-300 bg-amber-50 text-amber-700">
+                        Jumlah manual
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-end gap-2 rounded-xl border border-border/60 bg-muted/20 p-3">
+                    <div className="w-[110px] space-y-1">
+                      <p className="text-[11px] font-medium text-muted-foreground">Jumlah amil</p>
+                      <Input
+                        min={0}
+                        type="number"
+                        inputMode="numeric"
+                        value={packagingAmilCountInput}
+                        disabled={isReadOnly}
+                        onChange={(event) => setPackagingAmilCountInput(event.target.value)}
+                        className="h-10 rounded-xl bg-background tabular-nums"
+                      />
+                    </div>
+                    <div className="w-[110px] space-y-1">
+                      <p className="text-[11px] font-medium text-muted-foreground">Jumlah non-amil</p>
+                      <Input
+                        min={0}
+                        type="number"
+                        inputMode="numeric"
+                        value={packagingNonAmilCountInput}
+                        disabled={isReadOnly}
+                        onChange={(event) => setPackagingNonAmilCountInput(event.target.value)}
+                        className="h-10 rounded-xl bg-background tabular-nums"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      className="h-10 rounded-xl"
+                      disabled={isReadOnly || !selectedPeriod?.id || !isPackagingCountChanged || savePackagingCountMutation.isPending}
+                      onClick={() => savePackagingCountMutation.mutate()}
+                    >
+                      {savePackagingCountMutation.isPending ? "Menyimpan..." : "Simpan jumlah"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-10 rounded-xl"
+                      disabled={isReadOnly}
+                      onClick={() => {
+                        setPackagingAmilCountInput(String(defaultPackagingAmilCount));
+                        setPackagingNonAmilCountInput(String(defaultPackagingNonAmilCount));
+                      }}
+                    >
+                      <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                      Data mustahik ({defaultPackagingAmilCount}/{defaultPackagingNonAmilCount})
+                    </Button>
+                  </div>
+                </CardHeader>
+
+                <CardContent className="space-y-3">
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    <PackagingGroupCard
+                      title="Amil"
+                      caption="Porsi amil dari zakat fitrah dan zakat mal."
+                      tone="amil"
+                      group={overallPackagingSummary.groupBreakdown.amil}
+                      showFood={false}
+                      sources={[
+                        { label: "ZF", value: formatCurrency(overallPackagingSummary.groupBreakdown.amil.zakatFitrahCash) },
+                        { label: "ZM", value: formatCurrency(overallPackagingSummary.groupBreakdown.amil.zakatMalCash) },
+                        { label: "Fidyah", value: "tidak dialokasikan" },
+                      ]}
+                    />
+                    <PackagingGroupCard
+                      title="Non-Amil"
+                      caption="Sisa zakat fitrah, sisa zakat mal, dan seluruh fidyah."
+                      tone="nonAmil"
+                      group={overallPackagingSummary.groupBreakdown.nonAmil}
+                      showFood
+                      sources={[
+                        { label: "ZF", value: formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.zakatFitrahCash) },
+                        { label: "ZM", value: formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.zakatMalCash) },
+                        { label: "Fidyah", value: formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.fidyahCash) },
+                      ]}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
+                    <p className="text-xs text-muted-foreground">
+                      Nilai per orang dibulatkan ke bawah agar dana selalu cukup saat pembungkusan.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-xl"
+                        onClick={() => {
+                          setPackagingDetailTab("asnaf");
+                          setIsPackagingDetailOpen(true);
+                        }}
+                      >
+                        Per golongan
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-xl"
+                        onClick={() => {
+                          setPackagingDetailTab("mustahik");
+                          setIsPackagingDetailOpen(true);
+                        }}
+                      >
+                        Per mustahik
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="border-border/70">
+                <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                  Belum ada penerimaan pada periode ini.
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* Tab 2 - Batch baru */}
+          <TabsContent value="batch" className="mt-3 space-y-3">
+            <Card className="border-border/70">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Dana tersedia untuk batch berikutnya</CardTitle>
+                <CardDescription>Dana masuk kumulatif dikurangi dana yang sudah dikunci batch sebelumnya.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto rounded-xl border border-border/60">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40">
+                        <TableHead>Kategori</TableHead>
+                        <TableHead className="text-right">Dana masuk</TableHead>
+                        <TableHead className="text-right">Sudah dikunci</TableHead>
+                        <TableHead className="text-right">Tersedia</TableHead>
+                        <TableHead className="text-right">Teralokasi</TableHead>
+                        <TableHead className="text-right">Penerima</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {categorySummaries.map((item) => {
+                        const Icon = item.meta.icon;
+                        return (
+                          <TableRow key={item.category}>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Icon className={`h-4 w-4 ${item.meta.accent}`} />
+                                <span className="font-medium">{item.meta.label}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-muted-foreground">
+                              {toDisplayAmount(item.meta.unit, item.inflowValue)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-muted-foreground">
+                              {toDisplayAmount(item.meta.unit, item.lockedValue)}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold tabular-nums">
+                              {toDisplayAmount(item.meta.unit, item.availableValue)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {toDisplayAmount(item.meta.unit, item.allocatedValue)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-muted-foreground">
+                              {item.totalRecipients > 0 ? item.totalRecipients : "-"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {unallocatedCategories.length > 0 && (
+                  <p className="mt-2 text-xs text-amber-700">
+                    Sebagian dana belum teralokasi karena belum ada mustahik yang berhak:{" "}
+                    {unallocatedCategories
+                      .map(
+                        (item) =>
+                          `${item.meta.label} ${toDisplayAmount(item.meta.unit, item.availableValue - item.allocatedValue)}`,
+                      )
+                      .join(", ")}
+                    .
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-primary/25">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Lock className="h-4 w-4" />
+                  Kunci batch perhitungan
+                </CardTitle>
+                <CardDescription>
+                  Snapshot disimpan permanen. Dana yang sudah dikunci tidak ikut lagi pada batch berikutnya.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <StatTile
+                    label="Kas dikunci"
+                    value={formatCurrency(allocationTotals.cash)}
+                    hint={`Tersedia ${formatCurrency(availableTotals.cash)}`}
+                  />
+                  <StatTile
+                    label="Beras dikunci"
+                    value={`${allocationTotals.rice.toFixed(2)} kg`}
+                    hint={`Tersedia ${availableTotals.rice.toFixed(2)} kg`}
+                  />
+                  <StatTile
+                    label="Makanan dikunci"
+                    value={`${allocationTotals.food.toFixed(2)} kg`}
+                    hint={`Tersedia ${availableTotals.food.toFixed(2)} kg`}
+                  />
+                </div>
+
+                <Textarea
+                  placeholder="Catatan batch (opsional). Contoh: Batch penyaluran pekan 2 Ramadhan"
+                  value={batchNotes}
+                  onChange={(e) => setBatchNotes(e.target.value)}
+                  className="min-h-[72px] rounded-xl"
+                />
+
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    {hasAllocationToLock
+                      ? `${categorySummaries.reduce((sum, item) => sum + item.totalRecipients, 0)} baris alokasi siap dikunci.`
+                      : "Belum ada alokasi yang bisa dikunci."}
+                  </p>
+                  <Button
+                    className="rounded-xl"
+                    onClick={() => lockCalculationBatchMutation.mutate()}
+                    disabled={
+                      !selectedPeriod?.id || isReadOnly || !hasAllocationToLock || lockCalculationBatchMutation.isPending
+                    }
+                  >
+                    {lockCalculationBatchMutation.isPending ? "Mengunci..." : "Kunci batch"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Tab 3 - Riwayat batch */}
+          <TabsContent value="riwayat" className="mt-3">
+            <Card className="border-border/70">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Riwayat batch perhitungan</CardTitle>
+                <CardDescription>Batch terkunci dapat langsung diproses di menu Pendistribusian.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {lockedBatches.length === 0 ? (
+                  <p className="py-10 text-center text-sm text-muted-foreground">
+                    Belum ada batch terkunci pada periode ini.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-border/60">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/40">
+                          <TableHead>Batch</TableHead>
+                          <TableHead>Tanggal kunci</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Kas</TableHead>
+                          <TableHead className="text-right">Beras</TableHead>
+                          <TableHead className="text-right">Makanan</TableHead>
+                          <TableHead>Catatan</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {lockedBatches.map((batch) => (
+                          <TableRow key={batch.id}>
+                            <TableCell className="font-medium">{batch.batch_code || `BATCH-${batch.batch_no}`}</TableCell>
+                            <TableCell className="whitespace-nowrap text-muted-foreground">
+                              {format(new Date(batch.locked_at), "dd MMM yyyy HH:mm", { locale: idLocale })}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={batch.status === "distributed" ? "default" : "outline"} className="rounded-full">
+                                {BATCH_STATUS_LABELS[batch.status] || batch.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{formatCurrency(batch.total_allocated_cash || 0)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{(batch.total_allocated_rice_kg || 0).toFixed(2)} kg</TableCell>
+                            <TableCell className="text-right tabular-nums">{(batch.total_allocated_food_kg || 0).toFixed(2)} kg</TableCell>
+                            <TableCell className="text-muted-foreground">{batch.notes || "-"}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+
         <Dialog open={isPackagingDetailOpen} onOpenChange={setIsPackagingDetailOpen}>
-          <DialogContent className="max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[92dvh] max-w-6xl overflow-y-auto">
+          <DialogContent className="max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[92dvh] max-w-5xl overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Detail Pembungkusan Total Keseluruhan</DialogTitle>
+              <DialogTitle>Rincian alokasi total periode</DialogTitle>
             </DialogHeader>
 
             {overallPackagingSummary.recipients.length > 0 ? (
-              <div className="space-y-4">
-                <div className="grid gap-2 md:grid-cols-6">
-                  <div className="rounded-md border bg-muted/20 p-2">
-                    <p className="text-[11px] text-muted-foreground">Total Uang</p>
-                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingSummary.totals.totalCash)}</p>
-                  </div>
-                  <div className="rounded-md border bg-muted/20 p-2">
-                    <p className="text-[11px] text-muted-foreground">Uang Zakat Fitrah</p>
-                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingSummary.totals.zakatFitrahCash)}</p>
-                  </div>
-                  <div className="rounded-md border bg-muted/20 p-2">
-                    <p className="text-[11px] text-muted-foreground">Uang Zakat Mal</p>
-                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingSummary.totals.zakatMalCash)}</p>
-                  </div>
-                  <div className="rounded-md border bg-muted/20 p-2">
-                    <p className="text-[11px] text-muted-foreground">Uang Fidyah</p>
-                    <p className="text-sm font-semibold">{formatCurrency(overallPackagingSummary.totals.fidyahCash)}</p>
-                  </div>
-                  <div className="rounded-md border bg-muted/20 p-2">
-                    <p className="text-[11px] text-muted-foreground">Beras Zakat</p>
-                    <p className="text-sm font-semibold">{overallPackagingSummary.totals.totalRiceKg.toFixed(2)} kg</p>
-                  </div>
-                  <div className="rounded-md border bg-muted/20 p-2">
-                    <p className="text-[11px] text-muted-foreground">Makanan Fidyah</p>
-                    <p className="text-sm font-semibold">{overallPackagingSummary.totals.totalFoodKg.toFixed(2)} kg</p>
-                  </div>
-                </div>
+              <Tabs value={packagingDetailTab} onValueChange={(v) => setPackagingDetailTab(v as "asnaf" | "mustahik")}>
+                <TabsList className="rounded-xl">
+                  <TabsTrigger value="asnaf" className="rounded-lg">
+                    Per golongan
+                  </TabsTrigger>
+                  <TabsTrigger value="mustahik" className="rounded-lg">
+                    Per mustahik ({overallPackagingSummary.recipients.length})
+                  </TabsTrigger>
+                </TabsList>
 
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
-                    <div className="mb-2 flex items-center justify-between">
-                      <p className="text-sm font-semibold">Kelompok Amil</p>
-                      <Badge>{overallPackagingSummary.groupBreakdown.amil.recipientCount} orang</Badge>
-                    </div>
-                    <div className="grid gap-2 text-xs sm:grid-cols-2 sm:text-sm">
-                      <div className="rounded-md border bg-background/80 p-2">
-                        <p className="text-muted-foreground">Total Uang</p>
-                        <p className="font-semibold">{formatCurrency(overallPackagingSummary.groupBreakdown.amil.totalCash)}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          Rata-rata: {formatCurrency(overallPackagingSummary.groupBreakdown.amil.averageCashPerRecipient)}/orang
-                        </p>
-                      </div>
-                      <div className="rounded-md border bg-background/80 p-2">
-                        <p className="text-muted-foreground">Total Beras</p>
-                        <p className="font-semibold">{overallPackagingSummary.groupBreakdown.amil.totalRiceKg.toFixed(2)} kg</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          Rata-rata: {overallPackagingSummary.groupBreakdown.amil.averageRicePerRecipient.toFixed(2)} kg/orang
-                        </p>
-                      </div>
-                      <div className="rounded-md border bg-background/80 p-2 sm:col-span-2">
-                        <p className="text-muted-foreground">Detail Uang</p>
-                        <p className="font-medium">
-                          ZF {formatCurrency(overallPackagingSummary.groupBreakdown.amil.zakatFitrahCash)} | ZM{" "}
-                          {formatCurrency(overallPackagingSummary.groupBreakdown.amil.zakatMalCash)} | FD{" "}
-                          {formatCurrency(overallPackagingSummary.groupBreakdown.amil.fidyahCash)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
-                    <div className="mb-2 flex items-center justify-between">
-                      <p className="text-sm font-semibold">Kelompok Non-Amil</p>
-                      <Badge variant="outline">{overallPackagingSummary.groupBreakdown.nonAmil.recipientCount} orang</Badge>
-                    </div>
-                    <div className="grid gap-2 text-xs sm:grid-cols-2 sm:text-sm">
-                      <div className="rounded-md border bg-background/80 p-2">
-                        <p className="text-muted-foreground">Total Uang</p>
-                        <p className="font-semibold">{formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.totalCash)}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          Rata-rata: {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.averageCashPerRecipient)}/orang
-                        </p>
-                      </div>
-                      <div className="rounded-md border bg-background/80 p-2">
-                        <p className="text-muted-foreground">Total Beras</p>
-                        <p className="font-semibold">{overallPackagingSummary.groupBreakdown.nonAmil.totalRiceKg.toFixed(2)} kg</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          Rata-rata: {overallPackagingSummary.groupBreakdown.nonAmil.averageRicePerRecipient.toFixed(2)} kg/orang
-                        </p>
-                      </div>
-                      <div className="rounded-md border bg-background/80 p-2 sm:col-span-2">
-                        <p className="text-muted-foreground">Detail Uang</p>
-                        <p className="font-medium">
-                          ZF {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.zakatFitrahCash)} | ZM{" "}
-                          {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.zakatMalCash)} | FD{" "}
-                          {formatCurrency(overallPackagingSummary.groupBreakdown.nonAmil.fidyahCash)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <p className="text-xs text-muted-foreground">
-                  Catatan: nilai <span className="font-medium">rata-rata/orang</span> dipakai untuk mempermudah pembungkusan cepat.
-                  Detail nominal tiap penerima tetap lihat tab <span className="font-medium">Per Mustahik</span>.
-                </p>
-
-                <Tabs value={packagingDetailTab} onValueChange={(v) => setPackagingDetailTab(v as "asnaf" | "mustahik")}>
-                  <TabsList>
-                    <TabsTrigger value="asnaf">Per Golongan</TabsTrigger>
-                    <TabsTrigger value="mustahik">Per Mustahik</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="asnaf" className="mt-3">
-                    <div className="overflow-x-auto rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Golongan</TableHead>
-                            <TableHead className="text-right">Mustahik</TableHead>
-                            <TableHead className="text-right">Total Uang</TableHead>
-                            <TableHead className="text-right">Beras</TableHead>
-                            <TableHead className="text-right">Makanan</TableHead>
-                            <TableHead className="text-right">Detail Uang</TableHead>
+                <TabsContent value="asnaf" className="mt-3">
+                  <div className="overflow-x-auto rounded-xl border border-border/60">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/40">
+                          <TableHead>Golongan</TableHead>
+                          <TableHead className="text-right">Orang</TableHead>
+                          <TableHead className="text-right">Uang</TableHead>
+                          <TableHead className="text-right">Beras</TableHead>
+                          <TableHead className="text-right">Makanan</TableHead>
+                          <TableHead className="text-right">ZF / ZM / Fidyah</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {overallPackagingSummary.asnafGroups.map((group) => (
+                          <TableRow key={group.asnafCode}>
+                            <TableCell>
+                              <Badge variant={group.asnafCode === "amil" ? "default" : "outline"} className="rounded-full">
+                                {getLabel(group.asnafCode)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{group.recipientCount}</TableCell>
+                            <TableCell className="text-right font-medium tabular-nums">{formatCurrency(group.totalCash)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{group.totalRiceKg.toFixed(2)} kg</TableCell>
+                            <TableCell className="text-right tabular-nums">{group.totalFoodKg.toFixed(2)} kg</TableCell>
+                            <TableCell className="whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+                              {formatCurrency(group.zakatFitrahCash)} / {formatCurrency(group.zakatMalCash)} /{" "}
+                              {formatCurrency(group.fidyahCash)}
+                            </TableCell>
                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {overallPackagingSummary.asnafGroups.map((group) => (
-                            <TableRow key={group.asnafCode}>
-                              <TableCell>
-                                <Badge variant={group.asnafCode === "amil" ? "default" : "outline"}>{getLabel(group.asnafCode)}</Badge>
-                              </TableCell>
-                              <TableCell className="text-right">{group.recipientCount}</TableCell>
-                              <TableCell className="text-right font-medium">{formatCurrency(group.totalCash)}</TableCell>
-                              <TableCell className="text-right">{group.totalRiceKg.toFixed(2)} kg</TableCell>
-                              <TableCell className="text-right">{group.totalFoodKg.toFixed(2)} kg</TableCell>
-                              <TableCell className="text-right text-xs text-muted-foreground">
-                                ZF {formatCurrency(group.zakatFitrahCash)} | ZM {formatCurrency(group.zakatMalCash)} | FD{" "}
-                                {formatCurrency(group.fidyahCash)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </TabsContent>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </TabsContent>
 
-                  <TabsContent value="mustahik" className="mt-3">
-                    <div className="max-h-[58vh] overflow-auto rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Nama</TableHead>
-                            <TableHead>Golongan</TableHead>
-                            <TableHead className="text-right">Total Uang</TableHead>
-                            <TableHead className="text-right">Beras</TableHead>
-                            <TableHead className="text-right">Makanan</TableHead>
-                            <TableHead className="text-right">Detail Uang</TableHead>
+                <TabsContent value="mustahik" className="mt-3">
+                  <div className="max-h-[58vh] overflow-auto rounded-xl border border-border/60">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/40">
+                          <TableHead>Nama</TableHead>
+                          <TableHead>Golongan</TableHead>
+                          <TableHead className="text-right">Uang</TableHead>
+                          <TableHead className="text-right">Beras</TableHead>
+                          <TableHead className="text-right">Makanan</TableHead>
+                          <TableHead className="text-right">ZF / ZM / Fidyah</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {overallPackagingSummary.recipients.map((recipient) => (
+                          <TableRow key={recipient.mustahikId}>
+                            <TableCell className="font-medium">{recipient.name}</TableCell>
+                            <TableCell>
+                              <Badge variant={recipient.asnafCode === "amil" ? "default" : "outline"} className="rounded-full">
+                                {getLabel(recipient.asnafCode)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right font-medium tabular-nums">{formatCurrency(recipient.totalCash)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{recipient.totalRiceKg.toFixed(2)} kg</TableCell>
+                            <TableCell className="text-right tabular-nums">{recipient.totalFoodKg.toFixed(2)} kg</TableCell>
+                            <TableCell className="whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+                              {formatCurrency(recipient.zakatFitrahCash)} / {formatCurrency(recipient.zakatMalCash)} /{" "}
+                              {formatCurrency(recipient.fidyahCash)}
+                            </TableCell>
                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {overallPackagingSummary.recipients.map((recipient) => (
-                            <TableRow key={recipient.mustahikId}>
-                              <TableCell className="font-medium">{recipient.name}</TableCell>
-                              <TableCell>
-                                <Badge variant={recipient.asnafCode === "amil" ? "default" : "outline"}>{getLabel(recipient.asnafCode)}</Badge>
-                              </TableCell>
-                              <TableCell className="text-right font-medium">{formatCurrency(recipient.totalCash)}</TableCell>
-                              <TableCell className="text-right">{recipient.totalRiceKg.toFixed(2)} kg</TableCell>
-                              <TableCell className="text-right">{recipient.totalFoodKg.toFixed(2)} kg</TableCell>
-                              <TableCell className="text-right text-xs text-muted-foreground">
-                                ZF {formatCurrency(recipient.zakatFitrahCash)} | ZM {formatCurrency(recipient.zakatMalCash)} | FD{" "}
-                                {formatCurrency(recipient.fidyahCash)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </TabsContent>
-                </Tabs>
-              </div>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </TabsContent>
+              </Tabs>
             ) : (
-              <p className="py-6 text-center text-sm text-muted-foreground">Belum ada data pembungkusan total untuk periode ini.</p>
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                Belum ada alokasi per mustahik. Pastikan data mustahik aktif sudah terisi.
+              </p>
             )}
           </DialogContent>
         </Dialog>

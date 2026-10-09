@@ -3,6 +3,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
+import { PageHero, StatTile } from "@/components/shared/PageHeader";
+import {
+  FORM_DIALOG_CONTENT_CLASS,
+  FormBody,
+  FormDialogHeader,
+  FormFooterBar,
+  FormSection,
+} from "@/components/shared/FormShell";
 import { MuzakkiSearchSelect } from "@/components/shared/MuzakkiSearchSelect";
 import { CurrencyInput } from "@/components/shared/CurrencyInput";
 import { usePeriod } from "@/contexts/PeriodContext";
@@ -30,7 +38,19 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Eye, Receipt, Pencil, ShieldAlert, Trash2, Wheat, Banknote } from "lucide-react";
+import {
+  Plus,
+  Minus,
+  Eye,
+  Receipt,
+  Pencil,
+  Search,
+  ShieldAlert,
+  Trash2,
+  Users,
+  Wheat,
+  Banknote,
+} from "lucide-react";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { formatCurrency } from "@/lib/formatCurrency";
@@ -107,6 +127,8 @@ export default function ZakatFitrah() {
   const queryClient = useQueryClient();
 
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showAdvancedValue, setShowAdvancedValue] = useState(false);
   const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [correctingTransaction, setCorrectingTransaction] = useState<Transaction | null>(null);
@@ -200,6 +222,24 @@ export default function ZakatFitrah() {
     if (!createdBy) return "-";
     return creatorMap.get(createdBy) || createdBy;
   };
+
+  // Ringkasan hanya menghitung transaksi yang tidak dibatalkan.
+  const summaryStats = useMemo(() => {
+    const valid = transactions.filter((tx) => !tx.is_void);
+    return {
+      count: valid.length,
+      voidCount: transactions.length - valid.length,
+      rice: valid.reduce((sum, tx) => sum + Number(tx.rice_amount_kg || 0), 0),
+      cash: valid.reduce((sum, tx) => sum + Number(tx.money_amount || 0), 0),
+      jiwa: valid.reduce((sum, tx) => sum + Number(tx.total_members || 0), 0),
+    };
+  }, [transactions]);
+
+  const filteredTransactions = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase();
+    if (!keyword) return transactions;
+    return transactions.filter((tx) => (tx.muzakki?.name || "").toLowerCase().includes(keyword));
+  }, [transactions, searchTerm]);
 
   // Fetch members for selected muzakki with paid status check
   const { data: muzakkiMembers = [], isLoading: isLoadingMembers } = useQuery({
@@ -436,6 +476,7 @@ export default function ZakatFitrah() {
     setCustomRicePerPerson(periodRicePerPerson);
     setCustomCashPerPerson(periodCashPerPerson);
     setCustomTotalRiceKg(0);
+    setShowAdvancedValue(false);
   };
 
   const correctionMutation = useMutation({
@@ -645,131 +686,212 @@ export default function ZakatFitrah() {
     <AppLayout title="Zakat Fitrah">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
 
-      <div className="space-y-3 sm:space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-base font-semibold leading-tight sm:text-lg">
-            <span className="block">Transaksi Zakat Fitrah</span>
-            <span className="mt-1 block text-xs font-medium text-muted-foreground sm:text-sm">
-              {selectedPeriod?.name || "Pilih Periode"}
-            </span>
-          </h2>
-          {!isReadOnly && selectedPeriod && (
-            <Button
-              onClick={() => {
-                resetForm();
-                setIsFormOpen(true);
-              }}
-              className="h-9 w-full gap-2 text-xs sm:h-10 sm:w-auto sm:text-sm"
-            >
-              <Plus className="h-4 w-4" />
-              Tambah Transaksi
-            </Button>
-          )}
-        </div>
+      <div className="space-y-4">
+        <PageHero
+          eyebrow="Penerimaan"
+          title="Transaksi Zakat Fitrah"
+          description="Pencatatan penerimaan zakat fitrah dalam bentuk beras maupun uang."
+          icon={Wheat}
+          tone="amber"
+          badges={
+            <>
+              <Badge variant="outline" className="rounded-full bg-background/70">
+                {selectedPeriod?.name || "Pilih periode"}
+              </Badge>
+              <Badge variant="outline" className="rounded-full bg-background/70 tabular-nums">
+                {periodRicePerPerson} kg atau {formatCurrency(periodCashPerPerson)} / jiwa
+              </Badge>
+            </>
+          }
+          highlight={{
+            label: "Total beras terkumpul",
+            value: `${summaryStats.rice.toLocaleString("id-ID", { maximumFractionDigits: 2 })} kg`,
+            hint: `+ ${formatCurrency(summaryStats.cash)} dalam bentuk uang`,
+          }}
+          actions={
+            !isReadOnly && selectedPeriod ? (
+              <Button
+                onClick={() => {
+                  resetForm();
+                  setIsFormOpen(true);
+                }}
+                className="h-10 w-full gap-2 rounded-xl shadow-md shadow-primary/20 sm:w-auto"
+              >
+                <Plus className="h-4 w-4" />
+                Tambah Transaksi
+              </Button>
+            ) : null
+          }
+        />
 
-        <Card>
-          <CardContent className="pt-4 sm:pt-6">
+        <section className="grid gap-3 grid-cols-2 xl:grid-cols-4">
+          <StatTile
+            label="Transaksi Sah"
+            value={summaryStats.count.toLocaleString("id-ID")}
+            hint={`${summaryStats.voidCount} dibatalkan`}
+            icon={Receipt}
+            tone="primary"
+            delay={60}
+          />
+          <StatTile
+            label="Total Beras"
+            value={`${summaryStats.rice.toLocaleString("id-ID", { maximumFractionDigits: 2 })} kg`}
+            hint={`Acuan ${periodRicePerPerson} kg/jiwa`}
+            icon={Wheat}
+            tone="amber"
+            delay={120}
+          />
+          <StatTile
+            label="Total Uang"
+            value={formatCurrency(summaryStats.cash)}
+            hint={`Acuan ${formatCurrency(periodCashPerPerson)}/jiwa`}
+            icon={Banknote}
+            tone="sky"
+            delay={180}
+          />
+          <StatTile
+            label="Jiwa Fitrah"
+            value={summaryStats.jiwa.toLocaleString("id-ID")}
+            hint="Total jiwa yang dizakati"
+            icon={Users}
+            tone="violet"
+            delay={240}
+          />
+        </section>
+
+        <Card style={{ animationDelay: "300ms" }} className="border-border/70 opacity-0 shadow-sm animate-rise motion-reduce:animate-none motion-reduce:opacity-100">
+          <CardHeader className="gap-3 pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-base">Daftar transaksi</CardTitle>
+              <div className="relative w-full sm:w-[280px]">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Cari nama muzakki"
+                  className="h-10 rounded-xl pl-9"
+                />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
             {isLoading ? (
-              <p className="text-muted-foreground text-center py-8">Memuat data...</p>
-            ) : transactions.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">
-                Belum ada transaksi zakat fitrah untuk periode ini
-              </p>
+              <p className="py-12 text-center text-sm text-muted-foreground">Memuat data...</p>
+            ) : filteredTransactions.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-12 text-center">
+                <Receipt className="h-8 w-8 text-muted-foreground/60" />
+                <p className="text-sm text-muted-foreground">
+                  {transactions.length === 0
+                    ? "Belum ada transaksi zakat fitrah untuk periode ini."
+                    : "Tidak ada transaksi yang cocok dengan pencarian."}
+                </p>
+              </div>
             ) : (
-              <Table className="min-w-[860px]">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>No. Transaksi</TableHead>
-                    <TableHead>Tanggal</TableHead>
-                    <TableHead>Muzakki</TableHead>
-                    <TableHead>Jenis</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Jumlah Anggota</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead>Input Oleh</TableHead>
-                    <TableHead className="text-right">Aksi</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transactions.map(tx => (
-                    <TableRow key={tx.id}>
-                      <TableCell className="font-mono text-xs">
-                        {tx.transaction_no ? `ZF-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {format(new Date(tx.transaction_date), "dd MMM yyyy, HH.mm", { locale: idLocale })}
-                      </TableCell>
-                      <TableCell className="font-medium whitespace-nowrap">{tx.muzakki?.name}</TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">
-                            {tx.payment_type === "rice" ? "Beras" : "Uang"}
-                          </Badge>
-                          {tx.payment_type === "rice" && tx.is_custom_total_rice && (
-                            <Badge variant="secondary" className="!whitespace-nowrap">Custom Total</Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {tx.is_void ? (
-                          <Badge variant="destructive">Void</Badge>
-                        ) : isTransactionLocked(tx) ? (
-                          <Badge variant="destructive" className="!whitespace-nowrap">
-                            Lock {tx.locked_batch?.batch_code || `#${tx.locked_batch?.batch_no || "-"}`}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">Editable</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="!whitespace-nowrap">{tx.total_members} orang</TableCell>
-                      <TableCell className="!whitespace-nowrap text-right">
-                        {tx.payment_type === "rice"
-                          ? `${tx.rice_amount_kg} kg`
-                          : formatCurrency(tx.money_amount || 0)}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground sm:text-sm whitespace-nowrap">{getCreatorName(tx.created_by)}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setViewingTransaction(tx)}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          {!isReadOnly && !tx.is_void && !isTransactionLocked(tx) && (
-                            <Button variant="ghost" size="icon" onClick={() => void handleOpenEdit(tx)}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {!isReadOnly && !tx.is_void && isTransactionLocked(tx) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setCorrectingTransaction(tx);
-                                setCorrectionReason("");
-                              }}
-                            >
-                              <ShieldAlert className="h-4 w-4 text-amber-600" />
-                            </Button>
-                          )}
-                          {!isReadOnly && !isTransactionLocked(tx) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDelete(tx)}
-                              disabled={deleteMutation.isPending}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
+              <div className="overflow-x-auto rounded-xl border border-border/60">
+                <Table className="min-w-[860px]">
+                  <TableHeader>
+                    <TableRow className="bg-gradient-to-r from-muted/70 to-muted/25 hover:bg-transparent">
+                      <TableHead>No. Transaksi</TableHead>
+                      <TableHead>Tanggal</TableHead>
+                      <TableHead>Muzakki</TableHead>
+                      <TableHead>Jenis</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Jiwa</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead>Input Oleh</TableHead>
+                      <TableHead className="text-right">Aksi</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredTransactions.map((tx) => (
+                      <TableRow
+                        key={tx.id}
+                        className={`transition-colors hover:bg-primary/[0.04] ${tx.is_void ? "opacity-60" : ""}`}
+                      >
+                        <TableCell className="font-mono text-xs">
+                          {tx.transaction_no ? `ZF-${String(tx.transaction_no).padStart(4, "0")}` : "-"}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {format(new Date(tx.transaction_date), "dd MMM yyyy, HH.mm", { locale: idLocale })}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap font-medium">{tx.muzakki?.name}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge variant="outline" className="rounded-full">
+                              {tx.payment_type === "rice" ? "Beras" : "Uang"}
+                            </Badge>
+                            {tx.payment_type === "rice" && tx.is_custom_total_rice && (
+                              <Badge variant="secondary" className="!whitespace-nowrap rounded-full">
+                                Custom
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {tx.is_void ? (
+                            <Badge variant="destructive" className="rounded-full">
+                              Void
+                            </Badge>
+                          ) : isTransactionLocked(tx) ? (
+                            <Badge className="!whitespace-nowrap rounded-full bg-amber-500 text-white hover:bg-amber-500">
+                              Terkunci {tx.locked_batch?.batch_code || `#${tx.locked_batch?.batch_no || "-"}`}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="rounded-full">
+                              Dapat diubah
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{tx.total_members}</TableCell>
+                        <TableCell className="!whitespace-nowrap text-right font-semibold tabular-nums">
+                          {tx.payment_type === "rice"
+                            ? `${Number(tx.rice_amount_kg || 0).toLocaleString("id-ID", { maximumFractionDigits: 2 })} kg`
+                            : formatCurrency(tx.money_amount || 0)}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                          {getCreatorName(tx.created_by)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-0.5">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewingTransaction(tx)}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            {!isReadOnly && !tx.is_void && !isTransactionLocked(tx) && (
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void handleOpenEdit(tx)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {!isReadOnly && !tx.is_void && isTransactionLocked(tx) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => {
+                                  setCorrectingTransaction(tx);
+                                  setCorrectionReason("");
+                                }}
+                              >
+                                <ShieldAlert className="h-4 w-4 text-amber-600" />
+                              </Button>
+                            )}
+                            {!isReadOnly && !isTransactionLocked(tx) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => handleDelete(tx)}
+                                disabled={deleteMutation.isPending}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -783,232 +905,292 @@ export default function ZakatFitrah() {
           if (!open) resetForm();
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] sm:max-h-[90dvh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingTransaction ? "Edit Transaksi Zakat Fitrah" : "Tambah Transaksi Zakat Fitrah"}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Muzakki *</Label>
-              <MuzakkiSearchSelect
-                value={selectedMuzakkiId}
-                onChange={(v, meta?: MuzakkiSelectionMeta) => {
-                  setSelectedMuzakkiId(v);
-                  setSelectedMembers([]);
-                  setFallbackHeadMemberId(null);
+        <DialogContent className={FORM_DIALOG_CONTENT_CLASS}>
+          <FormDialogHeader
+            icon={Wheat}
+            title={editingTransaction ? "Edit Transaksi Zakat Fitrah" : "Tambah Transaksi Zakat Fitrah"}
+            description={`Periode ${selectedPeriod?.name || "-"} · acuan ${periodRicePerPerson} kg atau ${formatCurrency(periodCashPerPerson)} per jiwa`}
+          />
 
-                  if (meta?.source === "created") {
-                    const nextCount = Math.max(1, meta.recommendedFitrahCount || 1);
-                    setManualFitrahCount(nextCount);
-                    setUseMemberSelection(false);
+          <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+            <FormBody>
+              <FormSection step={1} title="Muzakki" description="Cari muzakki yang sudah terdaftar, atau tambah baru.">
+                <MuzakkiSearchSelect
+                  value={selectedMuzakkiId}
+                  onChange={(v, meta?: MuzakkiSelectionMeta) => {
+                    setSelectedMuzakkiId(v);
+                    setSelectedMembers([]);
+                    setFallbackHeadMemberId(null);
 
-                    const firstCreatedMember = meta.createdMemberIds?.[0] || null;
-                    setFallbackHeadMemberId(firstCreatedMember);
-                    if (firstCreatedMember && nextCount === 1) {
-                      setSelectedMembers([firstCreatedMember]);
-                    }
-                    return;
-                  }
+                    if (meta?.source === "created") {
+                      const nextCount = Math.max(1, meta.recommendedFitrahCount || 1);
+                      setManualFitrahCount(nextCount);
+                      setUseMemberSelection(false);
 
-                  setManualFitrahCount(1);
-                }}
-                placeholder="Cari atau tambah muzakki..."
-              />
-            </div>
-
-            {selectedMuzakkiId && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
-                  <div>
-                    <Label className="text-xs sm:text-sm">Input Berdasarkan Anggota</Label>
-                    <p className="text-[11px] text-muted-foreground">
-                      Nonaktif: cukup isi jumlah fitrah (orang), tanpa pilih anggota.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={useMemberSelection}
-                    onCheckedChange={(checked) => {
-                      setUseMemberSelection(checked);
-                      if (checked && selectedMembers.length === 0 && fallbackHeadMemberId) {
-                        setSelectedMembers([fallbackHeadMemberId]);
+                      const firstCreatedMember = meta.createdMemberIds?.[0] || null;
+                      setFallbackHeadMemberId(firstCreatedMember);
+                      if (firstCreatedMember && nextCount === 1) {
+                        setSelectedMembers([firstCreatedMember]);
                       }
-                    }}
-                  />
-                </div>
+                      return;
+                    }
 
-                {!useMemberSelection ? (
-                  <div className="space-y-2 rounded-lg border p-3">
-                    <Label htmlFor="manualFitrahCount">Jumlah Fitrah (Orang) *</Label>
-                    <Input
-                      id="manualFitrahCount"
-                      type="number"
-                      min={1}
-                      value={manualFitrahCount}
-                      onChange={(e) => setManualFitrahCount(Math.max(1, Number(e.target.value) || 1))}
-                    />
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <Label>Anggota yang Dizakati *</Label>
-                  <Button type="button" variant="outline" size="sm" onClick={selectAllAvailable}>
-                    Pilih Semua
-                  </Button>
-                </div>
-                {isLoadingMembers ? (
-                  <p className="text-sm text-muted-foreground">Memuat anggota...</p>
-                ) : muzakkiMembers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Tidak ada anggota aktif</p>
-                ) : (
-                  <div className="border rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto">
-                    {muzakkiMembers.map(member => (
-                      <div
-                        key={member.id}
-                        className={`flex items-center gap-3 p-2 rounded ${member.already_paid ? "opacity-50 bg-muted" : "hover:bg-muted/50"}`}
-                      >
-                        <Checkbox
-                          checked={selectedMembers.includes(member.id)}
-                          onCheckedChange={() => toggleMember(member.id, !!member.already_paid)}
-                          disabled={member.already_paid}
-                        />
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{member.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {RELATIONSHIP_LABELS[member.relationship] || member.relationship}
-                          </p>
-                        </div>
-                        {member.already_paid && (
-                          <Badge variant="secondary" className="text-xs">Sudah Bayar</Badge>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                  </div>
-                )}
-              </div>
-            )}
+                    setManualFitrahCount(1);
+                  }}
+                  placeholder="Cari atau tambah muzakki..."
+                />
+              </FormSection>
 
-            <div className="space-y-2">
-              <Label>Jenis Pembayaran *</Label>
-              <RadioGroup
-                value={paymentType}
-                onValueChange={(v) => setPaymentType(v as "rice" | "money")}
-                className="grid grid-cols-2 gap-2 rounded-xl border border-border/70 bg-muted/30 p-1"
-              >
-                <div>
-                  <RadioGroupItem value="rice" id="payment-rice" className="peer sr-only" />
-                  <Label
-                    htmlFor="payment-rice"
-                    className="flex cursor-pointer items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-data-[state=checked]:bg-background peer-data-[state=checked]:text-foreground peer-data-[state=checked]:shadow-sm peer-data-[state=checked]:ring-1 peer-data-[state=checked]:ring-primary/25 sm:py-2.5 sm:text-sm"
-                  >
-                    <Wheat className="h-4 w-4" />
-                    Beras
-                  </Label>
-                </div>
-                <div>
-                  <RadioGroupItem value="money" id="payment-money" className="peer sr-only" />
-                  <Label
-                    htmlFor="payment-money"
-                    className="flex cursor-pointer items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-data-[state=checked]:bg-background peer-data-[state=checked]:text-foreground peer-data-[state=checked]:shadow-sm peer-data-[state=checked]:ring-1 peer-data-[state=checked]:ring-primary/25 sm:py-2.5 sm:text-sm"
-                  >
-                    <Banknote className="h-4 w-4" />
-                    Uang
-                  </Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            {/* Override Section */}
-            <div className="border rounded-lg p-4 space-y-3">
-              <h4 className="font-medium text-sm">Nilai Perhitungan</h4>
-              
-              {paymentType === "rice" ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="overrideRice" className="text-sm">Beras per orang</Label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">Override</span>
+              {selectedMuzakkiId && (
+                <FormSection
+                  step={2}
+                  title="Jumlah jiwa"
+                  description={
+                    useMemberSelection
+                      ? "Pilih anggota keluarga yang dizakati."
+                      : "Isi jumlah jiwa tanpa perlu memilih anggota satu per satu."
+                  }
+                  action={
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="hidden text-[11px] text-muted-foreground sm:block">Pilih anggota</span>
                       <Switch
-                        id="overrideRice"
-                        checked={isOverrideRice}
+                        checked={useMemberSelection}
                         onCheckedChange={(checked) => {
-                          setIsOverrideRice(checked);
-                          if (checked) setCustomRicePerPerson(periodRicePerPerson);
+                          setUseMemberSelection(checked);
+                          if (checked && selectedMembers.length === 0 && fallbackHeadMemberId) {
+                            setSelectedMembers([fallbackHeadMemberId]);
+                          }
                         }}
                       />
                     </div>
-                  </div>
-                  {isOverrideRice ? (
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={customRicePerPerson}
-                        onChange={(e) => setCustomRicePerPerson(Number(e.target.value))}
-                        className="border-amber-500"
-                      />
-                      <span className="text-sm">kg</span>
-                      <Badge variant="outline" className="text-amber-600 border-amber-500">Custom</Badge>
+                  }
+                >
+                  {!useMemberSelection ? (
+                    <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-background p-2.5">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-11 w-11 shrink-0 rounded-xl"
+                        onClick={() => setManualFitrahCount((prev) => Math.max(1, prev - 1))}
+                      >
+                        <Minus className="h-4 w-4" />
+                      </Button>
+                      <div className="min-w-0 flex-1 text-center">
+                        <Input
+                          id="manualFitrahCount"
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          value={manualFitrahCount}
+                          onChange={(e) => setManualFitrahCount(Math.max(1, Number(e.target.value) || 1))}
+                          className="h-11 border-0 bg-transparent text-center text-2xl font-semibold tabular-nums shadow-none focus-visible:ring-0"
+                        />
+                        <p className="text-[11px] text-muted-foreground">jiwa</p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-11 w-11 shrink-0 rounded-xl"
+                        onClick={() => setManualFitrahCount((prev) => prev + 1)}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">
-                      {periodRicePerPerson} kg (dari periode)
-                    </p>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-muted-foreground">
+                          {selectedMembers.length} dari {muzakkiMembers.filter((m) => !m.already_paid).length} anggota dipilih
+                        </p>
+                        <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={selectAllAvailable}>
+                          Pilih semua
+                        </Button>
+                      </div>
+                      {isLoadingMembers ? (
+                        <p className="py-6 text-center text-sm text-muted-foreground">Memuat anggota...</p>
+                      ) : muzakkiMembers.length === 0 ? (
+                        <p className="rounded-xl border border-dashed border-border/70 py-6 text-center text-sm text-muted-foreground">
+                          Tidak ada anggota aktif untuk muzakki ini.
+                        </p>
+                      ) : (
+                        <div className="max-h-56 space-y-1.5 overflow-y-auto rounded-xl border border-border/60 bg-background p-2">
+                          {muzakkiMembers.map((member) => {
+                            const checked = selectedMembers.includes(member.id);
+                            return (
+                              <label
+                                key={member.id}
+                                className={`flex cursor-pointer items-center gap-3 rounded-lg border p-2.5 transition-colors ${
+                                  member.already_paid
+                                    ? "cursor-not-allowed border-transparent bg-muted/60 opacity-60"
+                                    : checked
+                                      ? "border-primary/40 bg-primary/[0.07]"
+                                      : "border-transparent hover:bg-muted/60"
+                                }`}
+                              >
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={() => toggleMember(member.id, !!member.already_paid)}
+                                  disabled={member.already_paid}
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium">{member.name}</p>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {RELATIONSHIP_LABELS[member.relationship] || member.relationship}
+                                  </p>
+                                </div>
+                                {member.already_paid && (
+                                  <Badge variant="secondary" className="shrink-0 rounded-full text-[10px]">
+                                    Sudah bayar
+                                  </Badge>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   )}
+                </FormSection>
+              )}
 
-                  <div className="mt-3 space-y-2 rounded-md border border-dashed p-3">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="overrideTotalRice" className="text-sm">
-                        Total beras diterima
-                      </Label>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">Override</span>
+              <FormSection step={3} title="Bentuk pembayaran" description="Pilih beras atau uang sesuai yang diterima.">
+                <RadioGroup
+                  value={paymentType}
+                  onValueChange={(v) => setPaymentType(v as "rice" | "money")}
+                  className="grid grid-cols-2 gap-2"
+                >
+                  <div>
+                    <RadioGroupItem value="rice" id="payment-rice" className="peer sr-only" />
+                    <Label
+                      htmlFor="payment-rice"
+                      className="flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-border/60 bg-background px-3 py-3.5 text-center transition-all duration-200 hover:border-primary/40 peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/[0.08] peer-data-[state=checked]:shadow-sm"
+                    >
+                      <Wheat className="h-5 w-5 text-amber-600" />
+                      <span className="text-sm font-semibold">Beras</span>
+                      <span className="text-[11px] text-muted-foreground">{periodRicePerPerson} kg / jiwa</span>
+                    </Label>
+                  </div>
+                  <div>
+                    <RadioGroupItem value="money" id="payment-money" className="peer sr-only" />
+                    <Label
+                      htmlFor="payment-money"
+                      className="flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-border/60 bg-background px-3 py-3.5 text-center transition-all duration-200 hover:border-primary/40 peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/[0.08] peer-data-[state=checked]:shadow-sm"
+                    >
+                      <Banknote className="h-5 w-5 text-emerald-600" />
+                      <span className="text-sm font-semibold">Uang</span>
+                      <span className="text-[11px] text-muted-foreground">{formatCurrency(periodCashPerPerson)} / jiwa</span>
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </FormSection>
+
+              <FormSection
+                step={4}
+                title="Nilai perhitungan"
+                description={
+                  paymentType === "rice"
+                    ? `${effectiveRicePerPerson.toFixed(2)} kg per jiwa × ${totalMembersCount} jiwa`
+                    : `${formatCurrency(cashPerPerson)} per jiwa × ${totalMembersCount} jiwa`
+                }
+                action={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0 rounded-lg text-xs"
+                    onClick={() => setShowAdvancedValue((prev) => !prev)}
+                  >
+                    {showAdvancedValue ? "Tutup" : "Ubah nilai"}
+                  </Button>
+                }
+              >
+                {!showAdvancedValue ? (
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <Badge variant="outline" className="rounded-full">
+                      {isOverrideRice || isOverrideCash || isOverrideTotalRice ? "Nilai custom" : "Mengikuti setelan periode"}
+                    </Badge>
+                    {isOverrideTotalRice && paymentType === "rice" && (
+                      <span className="tabular-nums">Total dikunci {customTotalRiceKg.toFixed(2)} kg</span>
+                    )}
+                  </div>
+                ) : paymentType === "rice" ? (
+                  <div className="space-y-3">
+                    <div className="rounded-xl border border-border/60 bg-background p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label htmlFor="overrideRice" className="text-xs sm:text-sm">
+                          Beras per jiwa
+                        </Label>
+                        <Switch
+                          id="overrideRice"
+                          checked={isOverrideRice}
+                          onCheckedChange={(checked) => {
+                            setIsOverrideRice(checked);
+                            if (checked) setCustomRicePerPerson(periodRicePerPerson);
+                          }}
+                        />
+                      </div>
+                      {isOverrideRice ? (
+                        <div className="mt-2 flex items-center gap-2">
+                          <Input
+                            type="number"
+                            step="0.1"
+                            value={customRicePerPerson}
+                            onChange={(e) => setCustomRicePerPerson(Number(e.target.value))}
+                            className="h-11 rounded-xl border-amber-400 tabular-nums"
+                          />
+                          <span className="text-sm text-muted-foreground">kg</span>
+                        </div>
+                      ) : (
+                        <p className="mt-1 text-xs text-muted-foreground">{periodRicePerPerson} kg (dari setelan periode)</p>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-border/60 bg-background p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label htmlFor="overrideTotalRice" className="text-xs sm:text-sm">
+                          Total beras diterima
+                        </Label>
                         <Switch
                           id="overrideTotalRice"
                           checked={isOverrideTotalRice}
                           onCheckedChange={(checked) => {
                             setIsOverrideTotalRice(checked);
-                            if (checked) {
-                              setCustomTotalRiceKg(calculatedRiceTotal);
-                            }
+                            if (checked) setCustomTotalRiceKg(calculatedRiceTotal);
                           }}
                         />
                       </div>
-                    </div>
-                    {isOverrideTotalRice ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="number"
-                            step="0.1"
-                            min={0}
-                            value={customTotalRiceKg}
-                            onChange={(e) => setCustomTotalRiceKg(Number(e.target.value) || 0)}
-                            className="border-amber-500"
-                          />
-                          <span className="text-sm">kg</span>
-                          <Badge variant="outline" className="text-amber-600 border-amber-500">
-                            Custom Total
-                          </Badge>
+                      {isOverrideTotalRice ? (
+                        <div className="mt-2 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              step="0.1"
+                              min={0}
+                              value={customTotalRiceKg}
+                              onChange={(e) => setCustomTotalRiceKg(Number(e.target.value) || 0)}
+                              className="h-11 rounded-xl border-amber-400 tabular-nums"
+                            />
+                            <span className="text-sm text-muted-foreground">kg</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground tabular-nums">
+                            Setara {effectiveRicePerPerson.toFixed(3)} kg per jiwa
+                          </p>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          Auto hitung per orang: {effectiveRicePerPerson.toFixed(3)} kg
+                      ) : (
+                        <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">
+                          Otomatis {calculatedRiceTotal.toFixed(2)} kg untuk {totalMembersCount} jiwa
                         </p>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        Total otomatis: {calculatedRiceTotal.toFixed(2)} kg ({totalMembersCount} orang)
-                      </p>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="overrideCash" className="text-sm">Uang per orang</Label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">Override</span>
+                ) : (
+                  <div className="rounded-xl border border-border/60 bg-background p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label htmlFor="overrideCash" className="text-xs sm:text-sm">
+                        Uang per jiwa
+                      </Label>
                       <Switch
                         id="overrideCash"
                         checked={isOverrideCash}
@@ -1018,77 +1200,73 @@ export default function ZakatFitrah() {
                         }}
                       />
                     </div>
-                  </div>
-                  {isOverrideCash ? (
-                    <div className="flex items-center gap-2">
+                    {isOverrideCash ? (
                       <CurrencyInput
                         id="customCashPerPerson"
                         value={customCashPerPerson}
                         onChange={setCustomCashPerPerson}
-                        className="border-amber-500"
+                        className="mt-2 h-11 rounded-xl border-amber-400"
                       />
-                      <Badge variant="outline" className="text-amber-600 border-amber-500">Custom</Badge>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      Rp {periodCashPerPerson.toLocaleString("id-ID")} (dari periode)
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="notes">Catatan</Label>
-              <Textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Catatan transaksi (opsional)"
-              />
-            </div>
-
-            {totalMembersCount > 0 && (
-              <Card className="bg-muted/50">
-                <CardContent className="pt-4">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <p className="text-sm text-muted-foreground pt-4">Total Pembayaran</p>
-                      <p className="font-semibold">
-                        {totalMembersCount} orang ×{" "}
-                        {paymentType === "rice"
-                          ? `${effectiveRicePerPerson.toFixed(1)} kg`
-                          : `Rp ${cashPerPerson.toLocaleString("id-ID")}`}
+                    ) : (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {formatCurrency(periodCashPerPerson)} (dari setelan periode)
                       </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-lg font-bold">{calculateTotal()}</p>
-                    </div>
+                    )}
                   </div>
-                </CardContent>
-              </Card>
-            )}
+                )}
+              </FormSection>
 
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => { resetForm(); setIsFormOpen(false); }}>
+              <FormSection step={5} title="Catatan" description="Opsional, misalnya titipan atau keterangan khusus.">
+                <Textarea
+                  id="notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Catatan transaksi (opsional)"
+                  className="min-h-[72px] rounded-xl"
+                />
+              </FormSection>
+            </FormBody>
+
+            <FormFooterBar
+              summaryLabel="Total pembayaran"
+              summaryValue={calculateTotal()}
+              summaryHint={`${totalMembersCount} jiwa × ${
+                paymentType === "rice" ? `${effectiveRicePerPerson.toFixed(2)} kg` : formatCurrency(cashPerPerson)
+              }`}
+            >
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => {
+                  resetForm();
+                  setIsFormOpen(false);
+                }}
+              >
                 Batal
               </Button>
               <Button
                 type="submit"
+                className="rounded-xl"
                 disabled={
                   createMutation.isPending ||
+                  !selectedMuzakkiId ||
                   totalMembersCount <= 0 ||
                   (useMemberSelection && selectedMembers.length === 0)
                 }
               >
-                {editingTransaction ? "Simpan Perubahan" : "Simpan Transaksi"}
+                {createMutation.isPending
+                  ? "Menyimpan..."
+                  : editingTransaction
+                    ? "Simpan Perubahan"
+                    : "Simpan Transaksi"}
               </Button>
-            </div>
+            </FormFooterBar>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Correction Dialog */}
+
       <Dialog open={!!correctingTransaction} onOpenChange={(open) => !open && setCorrectingTransaction(null)}>
         <DialogContent>
           <DialogHeader>

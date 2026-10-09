@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { DataTable, Column } from "@/components/shared/DataTable";
+import { PageHeader, StatTile } from "@/components/shared/PageHeader";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
 import { AsnafEligibilityBadges } from "@/components/shared/AsnafEligibilityBadges";
 import { CreatableSingleSelect } from "@/components/shared/CreatableSingleSelect";
@@ -45,7 +46,11 @@ import {
   Download,
   Edit,
   Eye,
+  Filter,
+  HeartHandshake,
+  ListOrdered,
   MapPin,
+  Plus,
   Route,
   Search,
   StickyNote,
@@ -159,6 +164,13 @@ const compareNullableNumber = (a: number | null | undefined, b: number | null | 
     });
   };
 
+/**
+ * Nomor urut ditulis sebagai kelipatan 10 supaya masih ada ruang menyisipkan
+ * mustahik baru di tengah tanpa menomori ulang seluruh daftar. Kolomnya bertipe
+ * integer, jadi nilai pecahan seperti 3.1 akan dibulatkan diam-diam oleh basis data.
+ */
+const ORDER_STEP = 10;
+
 export default function MustahikPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [detailMustahik, setDetailMustahik] = useState<Mustahik | null>(null);
@@ -170,6 +182,7 @@ export default function MustahikPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [orderSort, setOrderSort] = useState<"asc" | "desc">("asc");
   const [isRouteFieldsAvailable, setIsRouteFieldsAvailable] = useState(true);
+  const [isRenumbering, setIsRenumbering] = useState(false);
   const [formData, setFormData] = useState<MustahikFormData>({
     name: "",
     address: "",
@@ -473,6 +486,50 @@ export default function MustahikPage() {
     ).sort(routeCollator.compare);
   }, [formData.distribution_rt, mustahikList]);
 
+  /** Nomor urut yang disarankan untuk grup RT + gang yang sedang dipilih di form. */
+  const suggestedDeliveryOrder = useMemo(() => {
+    const rt = formData.distribution_rt.trim();
+    const lane = formData.distribution_lane.trim();
+
+    const groupOrders = mustahikList
+      .filter(
+        (item) =>
+          item.id !== editingMustahik?.id &&
+          (item.distribution_rt?.trim() || "") === rt &&
+          (item.distribution_lane?.trim() || "") === lane &&
+          typeof item.delivery_order === "number",
+      )
+      .map((item) => item.delivery_order as number);
+
+    if (groupOrders.length === 0) return ORDER_STEP;
+    return Math.max(...groupOrders) + ORDER_STEP;
+  }, [formData.distribution_rt, formData.distribution_lane, mustahikList, editingMustahik?.id]);
+
+  /** Mustahik lain pada grup yang sama dengan nomor urut identik. */
+  const duplicateOrderName = useMemo(() => {
+    const parsed = Number(formData.delivery_order);
+    if (!formData.delivery_order || !Number.isFinite(parsed)) return null;
+
+    const rt = formData.distribution_rt.trim();
+    const lane = formData.distribution_lane.trim();
+
+    const clash = mustahikList.find(
+      (item) =>
+        item.id !== editingMustahik?.id &&
+        (item.distribution_rt?.trim() || "") === rt &&
+        (item.distribution_lane?.trim() || "") === lane &&
+        item.delivery_order === Math.round(parsed),
+    );
+
+    return clash?.name || null;
+  }, [
+    formData.delivery_order,
+    formData.distribution_rt,
+    formData.distribution_lane,
+    mustahikList,
+    editingMustahik?.id,
+  ]);
+
   const filteredMustahikList = useMemo(() => {
     const filtered = mustahikList.filter((item) => {
       const passesAsnaf =
@@ -512,6 +569,65 @@ export default function MustahikPage() {
     () => mustahikList.filter((item) => item.asnaf_settings?.asnaf_code !== "amil").length,
     [mustahikList],
   );
+
+  /**
+   * Menulis ulang nomor urut daftar yang sedang tampil menjadi kelipatan 10,
+   * dihitung terpisah untuk tiap grup RT + gang dan mengikuti urutan di layar.
+   */
+  const handleRenumberOrder = async () => {
+    const targets = filteredMustahikList;
+    if (targets.length === 0) return;
+
+    const counterPerGroup = new Map<string, number>();
+    const updates: { id: string; delivery_order: number }[] = [];
+
+    // Selalu dihitung menaik supaya hasilnya tidak terbalik saat filter diurutkan turun.
+    const ascending = orderSort === "asc" ? targets : [...targets].reverse();
+
+    ascending.forEach((item) => {
+      const groupKey = `${item.distribution_rt?.trim() || ""}|${item.distribution_lane?.trim() || ""}`;
+      const nextOrder = (counterPerGroup.get(groupKey) || 0) + ORDER_STEP;
+      counterPerGroup.set(groupKey, nextOrder);
+
+      if (item.delivery_order !== nextOrder) {
+        updates.push({ id: item.id, delivery_order: nextOrder });
+      }
+    });
+
+    if (updates.length === 0) {
+      toast({ title: "Nomor urut sudah rapi", description: "Tidak ada perubahan yang perlu disimpan." });
+      return;
+    }
+
+    setIsRenumbering(true);
+    try {
+      const BATCH_SIZE = 10;
+      for (let index = 0; index < updates.length; index += BATCH_SIZE) {
+        const results = await Promise.all(
+          updates.slice(index, index + BATCH_SIZE).map((update) =>
+            supabase.from("mustahik").update({ delivery_order: update.delivery_order }).eq("id", update.id),
+          ),
+        );
+
+        const failed = results.find((result) => result.error);
+        if (failed?.error) throw failed.error;
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["mustahik"] });
+      toast({
+        title: "Nomor urut dirapikan",
+        description: `${updates.length} mustahik ditulis ulang menjadi kelipatan ${ORDER_STEP}.`,
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Gagal merapikan nomor urut",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan tidak terduga",
+      });
+    } finally {
+      setIsRenumbering(false);
+    }
+  };
 
   const handleExportPDF = () => {
     if (filteredMustahikList.length === 0) {
@@ -563,6 +679,12 @@ export default function MustahikPage() {
   };
 
   const columns: Column<Mustahik>[] = [
+    {
+      key: "row_number",
+      header: "No.",
+      className: "w-[68px] whitespace-nowrap",
+      render: (_item, index) => <span className="font-medium text-muted-foreground">{index + 1}</span>,
+    },
     { key: "name", header: "Nama", className: 'whitespace-nowrap' },
     {
       key: "asnaf_id",
@@ -628,154 +750,150 @@ export default function MustahikPage() {
   return (
     <AppLayout title="Data Mustahik">
       {isReadOnly && <ReadOnlyBanner periodName={selectedPeriod?.name} />}
-      {!isRouteFieldsAvailable && (
-        <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-950 [&>svg]:text-amber-700">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Field wilayah distribusi belum aktif di database</AlertTitle>
-          <AlertDescription>
-            Jalankan <code>supabase db push</code> atau eksekusi migration terbaru agar field
-            <code> distribution_rt</code>, <code>distribution_lane</code>, dan <code>delivery_order</code> aktif.
-          </AlertDescription>
-        </Alert>
-      )}
 
-      <DataTable
-        title="Daftar Mustahik"
-        data={filteredMustahikList}
-        columns={columns}
-        isLoading={isLoading}
-        isReadOnly={isReadOnly}
-        emptyMessage="Belum ada data mustahik"
-        headerActions={
-          <div className="flex w-full flex-col gap-3 lg:min-w-[760px]">
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(260px,1fr)_auto_auto]">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Total</p>
-                  <p className="mt-1 text-base font-semibold">{mustahikList.length}</p>
-                </div>
-                <div className="rounded-2xl border border-emerald-200/70 bg-emerald-50/70 px-3 py-2 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-700">Amil</p>
-                  <p className="mt-1 text-base font-semibold text-emerald-900">{amilCount}</p>
-                </div>
-                <div className="rounded-2xl border border-sky-200/70 bg-sky-50/70 px-3 py-2 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-sky-700">Non-Amil</p>
-                  <p className="mt-1 text-base font-semibold text-sky-900">{nonAmilCount}</p>
-                </div>
-                <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2 shadow-sm">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Tersaring</p>
-                  <p className="mt-1 flex items-center gap-1 text-base font-semibold">
-                    <UserCheck className="h-4 w-4 text-primary" />
-                    {filteredMustahikList.length}
-                  </p>
-                </div>
-              </div>
-
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 md:top-1/3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Cari nama, alamat, RT, gang, asnaf, atau catatan..."
-                  className="h-11 rounded-2xl border-border/70 bg-background/85 pl-10 pr-4 text-sm shadow-sm"
-                />
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 rounded-2xl px-4 text-sm"
-                onClick={handleExportPDF}
-              >
+      <div className="space-y-4">
+        <PageHeader
+          title="Data Mustahik"
+          description="Daftar penerima zakat beserta golongan, prioritas, dan rute distribusinya."
+          icon={HeartHandshake}
+          badges={
+            <>
+              <Badge variant="outline" className="rounded-full tabular-nums">
+                {mustahikList.length} mustahik
+              </Badge>
+              <Badge variant="outline" className="rounded-full border-emerald-300 bg-emerald-50 text-emerald-700 tabular-nums">
+                {amilCount} amil
+              </Badge>
+            </>
+          }
+          actions={
+            <>
+              <Button type="button" variant="outline" className="h-10 rounded-xl" onClick={handleExportPDF}>
                 <Download className="mr-2 h-4 w-4" />
                 Download PDF
               </Button>
-
               {!isReadOnly && (
                 <Button
-                  className="h-11 rounded-2xl px-5 text-sm"
+                  className="h-10 rounded-xl"
                   onClick={() => {
                     resetForm();
                     setEditingMustahik(null);
                     setIsDialogOpen(true);
                   }}
                 >
+                  <Plus className="mr-2 h-4 w-4" />
                   Tambah Mustahik
                 </Button>
               )}
-            </div>
+            </>
+          }
+        />
 
-            <div className="grid gap-3 lg:grid-cols-[220px_220px_220px_auto]">
-              <div className="rounded-2xl border border-border/70 bg-background/85 p-2 shadow-sm">
-                <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                  Kategori
-                </p>
-                <Select value={asnafFilter} onValueChange={(value) => setAsnafFilter(value as "all" | "amil" | "non_amil") }>
-                  <SelectTrigger className="h-10 rounded-xl border-0 bg-transparent text-sm shadow-none focus:ring-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Semua Asnaf</SelectItem>
-                    <SelectItem value="amil">Amil Saja</SelectItem>
-                    <SelectItem value="non_amil">Selain Amil</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+        {!isRouteFieldsAvailable && (
+          <Alert className="border-amber-200 bg-amber-50 text-amber-950 [&>svg]:text-amber-700">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Field wilayah distribusi belum aktif di database</AlertTitle>
+            <AlertDescription>
+              Jalankan <code>supabase db push</code> atau eksekusi migration terbaru agar field
+              <code> distribution_rt</code>, <code>distribution_lane</code>, dan <code>delivery_order</code> aktif.
+            </AlertDescription>
+          </Alert>
+        )}
 
-              <div className="rounded-2xl border border-border/70 bg-background/85 p-2 shadow-sm">
-                <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                  RT / Wilayah
-                </p>
-                <CreatableSingleSelect
-                  value={rtFilter === "all" ? "" : rtFilter}
-                  onChange={(value) => {
-                    setRtFilter(value.trim() ? value : "all");
-                    setLaneFilter("all");
-                  }}
-                  options={rtOptions}
-                  placeholder="Semua RT"
-                  searchPlaceholder="Cari RT / wilayah..."
-                  emptyLabel="RT / wilayah tidak ditemukan"
-                  allowCreate={false}
+        <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <StatTile label="Total Mustahik" value={mustahikList.length.toLocaleString("id-ID")} icon={Users} tone="primary" />
+          <StatTile label="Amil" value={amilCount.toLocaleString("id-ID")} icon={UserCheck} tone="sky" />
+          <StatTile label="Non-Amil" value={nonAmilCount.toLocaleString("id-ID")} icon={Users} tone="violet" />
+          <StatTile
+            label="Hasil Filter"
+            value={filteredMustahikList.length.toLocaleString("id-ID")}
+            hint="Sesuai pencarian & filter"
+            icon={Filter}
+            tone="amber"
+          />
+        </section>
+
+        <DataTable
+          title="Daftar Mustahik"
+          data={filteredMustahikList}
+          columns={columns}
+          isLoading={isLoading}
+          isReadOnly={isReadOnly}
+          emptyMessage="Belum ada data mustahik"
+          headerActions={
+            <div className="grid w-full gap-2 lg:min-w-[720px] lg:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))_auto]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Cari nama, alamat, RT, gang, asnaf..."
+                  className="h-10 rounded-xl pl-9 text-sm"
                 />
               </div>
 
-              <div className="rounded-2xl border border-border/70 bg-background/85 p-2 shadow-sm">
-                <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                  Gang / Jalur
-                </p>
-                <CreatableSingleSelect
-                  value={laneFilter === "all" ? "" : laneFilter}
-                  onChange={(value) => setLaneFilter(value.trim() ? value : "all")}
-                  options={laneOptions}
-                  placeholder="Semua Gang"
-                  searchPlaceholder="Cari gang / jalur..."
-                  emptyLabel="Gang / jalur tidak ditemukan"
-                  allowCreate={false}
-                />
-              </div>
+              <Select value={asnafFilter} onValueChange={(value) => setAsnafFilter(value as "all" | "amil" | "non_amil")}>
+                <SelectTrigger className="h-10 rounded-xl text-sm">
+                  <SelectValue placeholder="Semua asnaf" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua asnaf</SelectItem>
+                  <SelectItem value="amil">Amil saja</SelectItem>
+                  <SelectItem value="non_amil">Selain amil</SelectItem>
+                </SelectContent>
+              </Select>
 
-              <div className="rounded-2xl border border-border/70 bg-background/85 p-2 shadow-sm">
-                <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                  Urutan Distribusi
-                </p>
+              <CreatableSingleSelect
+                value={rtFilter === "all" ? "" : rtFilter}
+                onChange={(value) => {
+                  setRtFilter(value.trim() ? value : "all");
+                  setLaneFilter("all");
+                }}
+                options={rtOptions}
+                placeholder="Semua RT"
+                searchPlaceholder="Cari RT / wilayah..."
+                emptyLabel="RT / wilayah tidak ditemukan"
+                allowCreate={false}
+              />
+
+              <CreatableSingleSelect
+                value={laneFilter === "all" ? "" : laneFilter}
+                onChange={(value) => setLaneFilter(value.trim() ? value : "all")}
+                options={laneOptions}
+                placeholder="Semua gang"
+                searchPlaceholder="Cari gang / jalur..."
+                emptyLabel="Gang / jalur tidak ditemukan"
+                allowCreate={false}
+              />
+
+              <div className="flex gap-2">
                 <Select value={orderSort} onValueChange={(value) => setOrderSort(value as "asc" | "desc")}>
-                  <SelectTrigger className="h-10 rounded-xl border-0 bg-transparent text-sm shadow-none">
+                  <SelectTrigger className="h-10 w-full rounded-xl text-sm lg:w-[150px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="asc">Urutan Kecil → Besar</SelectItem>
-                    <SelectItem value="desc">Urutan Besar → Kecil</SelectItem>
+                    <SelectItem value="asc">Urutan naik</SelectItem>
+                    <SelectItem value="desc">Urutan turun</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div className="flex items-end">
-                {(searchQuery || asnafFilter !== "all" || rtFilter !== "all" || laneFilter !== "all") && (
+                {!isReadOnly && isRouteFieldsAvailable && filteredMustahikList.length > 0 && (
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-11 w-full rounded-2xl text-sm lg:w-auto"
+                    className="h-10 shrink-0 gap-1.5 rounded-xl text-xs"
+                    disabled={isRenumbering}
+                    onClick={() => void handleRenumberOrder()}
+                    title={`Tulis ulang nomor urut daftar ini menjadi kelipatan ${ORDER_STEP} per RT/gang`}
+                  >
+                    <ListOrdered className="h-3.5 w-3.5" />
+                    {isRenumbering ? "Merapikan..." : "Rapikan urutan"}
+                  </Button>
+                )}
+                {(searchQuery || asnafFilter !== "all" || rtFilter !== "all" || laneFilter !== "all") && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-10 shrink-0 rounded-xl text-xs"
                     onClick={() => {
                       setSearchQuery("");
                       setAsnafFilter("all");
@@ -784,31 +902,31 @@ export default function MustahikPage() {
                       setOrderSort("asc");
                     }}
                   >
-                    Reset Semua Filter
+                    Reset
                   </Button>
                 )}
               </div>
             </div>
-          </div>
-        }
-        actions={(mustahik) => (
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" onClick={() => setDetailMustahik(mustahik)}>
-              <Eye className="h-4 w-4" />
-            </Button>
-            {!isReadOnly ? (
-              <>
-                <Button variant="ghost" size="icon" onClick={() => handleEdit(mustahik)}>
-                  <Edit className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="icon" onClick={() => setDeletingMustahik(mustahik)}>
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
-              </>
-            ) : null}
-          </div>
-        )}
-      />
+          }
+          actions={(mustahik) => (
+            <div className="flex items-center gap-0.5">
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDetailMustahik(mustahik)}>
+                <Eye className="h-4 w-4" />
+              </Button>
+              {!isReadOnly ? (
+                <>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(mustahik)}>
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDeletingMustahik(mustahik)}>
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </>
+              ) : null}
+            </div>
+          )}
+        />
+      </div>
 
       <Dialog open={!!detailMustahik} onOpenChange={(open) => !open && setDetailMustahik(null)}>
         <DialogContent className="max-w-2xl">
@@ -985,20 +1103,55 @@ export default function MustahikPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="delivery_order">Urutan Distribusi</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="delivery_order">Urutan Distribusi</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 rounded-lg px-2 text-[11px]"
+                    onClick={() => setFormData({ ...formData, delivery_order: String(suggestedDeliveryOrder) })}
+                  >
+                    Pakai {suggestedDeliveryOrder}
+                  </Button>
+                </div>
                 <Input
                   id="delivery_order"
                   type="number"
+                  inputMode="numeric"
                   min={1}
+                  step={1}
                   value={formData.delivery_order}
-                  onChange={(event) => setFormData({ ...formData, delivery_order: event.target.value })}
-                  placeholder="Contoh: 1"
+                  onChange={(event) => {
+                    // Kolomnya integer; pecahan akan dibulatkan diam-diam oleh basis data.
+                    const digitsOnly = event.target.value.replace(/[^0-9]/g, "");
+                    setFormData({ ...formData, delivery_order: digitsOnly });
+                  }}
+                  placeholder={`Contoh: ${ORDER_STEP}`}
                 />
+                {duplicateOrderName ? (
+                  <p className="text-[11px] text-amber-700">
+                    Nomor ini sudah dipakai {duplicateOrderName} pada RT/gang yang sama. Keduanya akan diurutkan
+                    berdasarkan nama.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    Gunakan kelipatan {ORDER_STEP} (10, 20, 30, ...) agar masih ada ruang menyisipkan di tengah.
+                  </p>
+                )}
               </div>
 
               <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground md:col-span-2">
-                Data ini dipakai untuk pengurutan lapangan: sistem akan mengurutkan berdasarkan RT, lalu Gang/Jalur,
-                lalu Urutan Distribusi.
+                <p>
+                  Data ini dipakai untuk pengurutan lapangan: sistem mengurutkan berdasarkan RT, lalu Gang/Jalur, lalu
+                  Urutan Distribusi.
+                </p>
+                <p className="mt-1.5 text-xs">
+                  Nomor urut hanya menerima bilangan bulat. Untuk menyisipkan di antara 30 dan 40, isi
+                  {" "}
+                  <span className="font-medium text-foreground">35</span> — bukan 3.1, karena angka pecahan akan
+                  dibulatkan oleh sistem.
+                </p>
               </div>
             </div>
 

@@ -734,6 +734,8 @@ export type Database = {
           name: string
           nisab_gold_price_per_gram: number | null
           nisab_silver_price_per_gram: number | null
+          packaging_amil_count_override: number | null
+          packaging_non_amil_count_override: number | null
           rice_amount_per_person: number | null
           start_date: string | null
           status: Database["public"]["Enums"]["period_status"]
@@ -756,6 +758,8 @@ export type Database = {
           name: string
           nisab_gold_price_per_gram?: number | null
           nisab_silver_price_per_gram?: number | null
+          packaging_amil_count_override?: number | null
+          packaging_non_amil_count_override?: number | null
           rice_amount_per_person?: number | null
           start_date?: string | null
           status?: Database["public"]["Enums"]["period_status"]
@@ -778,6 +782,8 @@ export type Database = {
           name?: string
           nisab_gold_price_per_gram?: number | null
           nisab_silver_price_per_gram?: number | null
+          packaging_amil_count_override?: number | null
+          packaging_non_amil_count_override?: number | null
           rice_amount_per_person?: number | null
           start_date?: string | null
           status?: Database["public"]["Enums"]["period_status"]
@@ -808,6 +814,42 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      service_sessions: {
+        Row: {
+          id: string
+          opened_at: string
+          scheduled_close_at: string | null
+          closed_at: string | null
+          note: string | null
+          opened_by: string | null
+          closed_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          opened_at?: string
+          scheduled_close_at?: string | null
+          closed_at?: string | null
+          note?: string | null
+          opened_by?: string | null
+          closed_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          opened_at?: string
+          scheduled_close_at?: string | null
+          closed_at?: string | null
+          note?: string | null
+          opened_by?: string | null
+          closed_by?: string | null
+          created_at?: string
           updated_at?: string
         }
         Relationships: []
@@ -1297,8 +1339,20 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_period_active: { Args: { _period_id: string }; Returns: boolean }
+      dashboard_period_summary: {
+        Args: { _period_id: string }
+        Returns: Json
+      }
       public_dashboard_summary: {
         Args: Record<string, never>
+        Returns: Json
+      }
+      export_all_data: {
+        Args: Record<string, never>
+        Returns: Json
+      }
+      reset_all_data: {
+        Args: { _scope?: string }
         Returns: Json
       }
     }

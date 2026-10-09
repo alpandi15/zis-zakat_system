@@ -26,14 +26,24 @@ export interface DashboardSummary {
 
   summary: {
     totalTransactionsFitrah: number;
+    totalMuzakkiHouseholds?: number;
     totalTransactions: number;
     totalJiwaFitrah: number;
+    totalMustahik?: number;
     totalDistributions: number;
   };
 
   receiptWindow: {
     firstReceiptAt: string | null;
     latestReceiptAt: string | null;
+  };
+
+  service?: {
+    isOpen: boolean;
+    openedAt: string | null;
+    scheduledCloseAt: string | null;
+    note: string | null;
+    lastClosedAt: string | null;
   };
 }
 

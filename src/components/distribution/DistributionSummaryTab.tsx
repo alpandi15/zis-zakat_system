@@ -24,6 +24,7 @@ import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { useAsnafSettings } from "@/hooks/useAsnafSettings";
 import { compareMustahikRoute, formatMustahikRoute } from "@/lib/mustahikRoute";
+import { CreatableSingleSelect } from "@/components/shared/CreatableSingleSelect";
 
 interface DistributionSummaryTabProps {
   periodId: string;
@@ -60,6 +61,8 @@ const DELIVERY_STATUS_CONFIG: Record<string, { label: string; variant: "default"
 
 export function DistributionSummaryTab({ periodId }: DistributionSummaryTabProps) {
   const [selectedMustahik, setSelectedMustahik] = useState<MustahikSummary | null>(null);
+  const [rtFilter, setRtFilter] = useState("");
+  const [laneFilter, setLaneFilter] = useState("");
   const { getLabel } = useAsnafSettings();
 
   // Fetch distribution assignments (source of truth for delivery status)
@@ -227,6 +230,35 @@ export function DistributionSummaryTab({ periodId }: DistributionSummaryTabProps
       });
   }, [mustahikList, zakatDist, fidyahDist, assignmentMap]);
 
+  const rtOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        summaryData
+          .map((item) => item.distribution_rt?.trim() || "")
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "id"));
+  }, [summaryData]);
+
+  const laneOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        summaryData
+          .filter((item) => !rtFilter || (item.distribution_rt?.trim() || "") === rtFilter)
+          .map((item) => item.distribution_lane?.trim() || "")
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "id"));
+  }, [summaryData, rtFilter]);
+
+  const filteredSummaryData = useMemo(() => {
+    return summaryData.filter((item) => {
+      const matchesRt = !rtFilter || (item.distribution_rt?.trim() || "") === rtFilter;
+      const matchesLane = !laneFilter || (item.distribution_lane?.trim() || "") === laneFilter;
+      return matchesRt && matchesLane;
+    });
+  }, [summaryData, rtFilter, laneFilter]);
+
   // Calculate totals
   const totals = useMemo(() => {
     return summaryData.reduce(
@@ -359,9 +391,59 @@ export function DistributionSummaryTab({ periodId }: DistributionSummaryTabProps
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {summaryData.length === 0 ? (
+          <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,220px)_1fr]">
+            <CreatableSingleSelect
+              value={rtFilter}
+              onChange={(nextValue) => {
+                setRtFilter(nextValue);
+                setLaneFilter("");
+              }}
+              options={rtOptions}
+              allowCreate={false}
+              placeholder="Semua RT / Wilayah"
+              searchPlaceholder="Cari RT / wilayah..."
+              emptyLabel="Belum ada RT / wilayah"
+              helperText="Saring riwayat distribusi berdasarkan RT."
+            />
+            <CreatableSingleSelect
+              value={laneFilter}
+              onChange={setLaneFilter}
+              options={laneOptions}
+              allowCreate={false}
+              placeholder="Semua Gang / Jalur"
+              searchPlaceholder="Cari gang / jalur..."
+              emptyLabel={rtFilter ? "Belum ada gang pada RT ini" : "Belum ada gang / jalur"}
+              helperText="Opsi gang mengikuti RT yang dipilih."
+            />
+            <div className="flex items-center justify-between rounded-2xl border border-border/70 bg-muted/30 px-4 py-3 text-sm">
+              <div>
+                <p className="font-medium text-foreground">Hasil Distribusi</p>
+                <p className="text-xs text-muted-foreground">
+                  Menampilkan {filteredSummaryData.length} dari {summaryData.length} penerima.
+                </p>
+              </div>
+              {(rtFilter || laneFilter) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-xl"
+                  onClick={() => {
+                    setRtFilter("");
+                    setLaneFilter("");
+                  }}
+                >
+                  Reset filter
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {filteredSummaryData.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">
-              Belum ada distribusi untuk periode ini
+              {summaryData.length === 0
+                ? "Belum ada distribusi untuk periode ini"
+                : "Tidak ada penerima yang cocok dengan filter wilayah"}
             </p>
           ) : (
             <Table>
@@ -379,7 +461,7 @@ export function DistributionSummaryTab({ periodId }: DistributionSummaryTabProps
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {summaryData.map(s => (
+                {filteredSummaryData.map(s => (
                   <TableRow key={s.id}>
                     <TableCell className="font-medium">{s.name}</TableCell>
                     <TableCell>

@@ -131,65 +131,53 @@ export function useDistributionCalculation(
       return balance || { total_cash: 0, total_rice_kg: 0, total_food_kg: 0 };
     };
 
+    const splitAmilAndBeneficiaryPortions = (
+      totalAmount: number,
+      amilCount: number,
+      beneficiaryCount: number,
+      scale: number,
+    ) => {
+      const scaledTotal = Math.max(0, Math.round(totalAmount * scale));
+      if (scaledTotal <= 0) {
+        return { amilPortion: 0, beneficiaryPortion: 0 };
+      }
+      if (amilCount === 0) {
+        return { amilPortion: 0, beneficiaryPortion: scaledTotal / scale };
+      }
+      if (beneficiaryCount === 0) {
+        return { amilPortion: scaledTotal / scale, beneficiaryPortion: 0 };
+      }
+
+      let amilScaled = 0;
+      if (amilDistributionMode === "proportional_with_factor") {
+        const totalRecipients = amilCount + beneficiaryCount;
+        const basePerRecipientScaled = totalRecipients > 0 ? Math.floor(scaledTotal / totalRecipients) : 0;
+        const amilPerRecipientScaled = Math.floor(basePerRecipientScaled * amilShareFactor);
+        amilScaled = Math.max(0, amilPerRecipientScaled * amilCount);
+      } else {
+        amilScaled = Math.max(0, Math.floor(scaledTotal * AMIL_PERCENTAGE));
+      }
+
+      amilScaled = Math.min(amilScaled, Math.floor(scaledTotal / 2));
+      const beneficiaryScaled = Math.max(0, scaledTotal - amilScaled);
+
+      return {
+        amilPortion: amilScaled / scale,
+        beneficiaryPortion: beneficiaryScaled / scale,
+      };
+    };
+
     const calculateAmilAndBeneficiaryPortions = (
       totalAmount: number,
       amilCount: number,
       beneficiaryCount: number
-    ) => {
-      if (totalAmount <= 0) {
-        return { amilPortion: 0, beneficiaryPortion: 0 };
-      }
-      if (amilCount === 0) {
-        return { amilPortion: 0, beneficiaryPortion: totalAmount };
-      }
-      if (beneficiaryCount === 0) {
-        return { amilPortion: totalAmount, beneficiaryPortion: 0 };
-      }
-
-      if (amilDistributionMode === "proportional_with_factor") {
-        const proportionalPortion = totalAmount * (amilCount / (amilCount + beneficiaryCount));
-        const amilPortion = proportionalPortion * amilShareFactor;
-        return {
-          amilPortion,
-          beneficiaryPortion: totalAmount - amilPortion,
-        };
-      }
-
-      const amilPortion = totalAmount * AMIL_PERCENTAGE;
-      return {
-        amilPortion,
-        beneficiaryPortion: totalAmount - amilPortion,
-      };
-    };
+    ) => splitAmilAndBeneficiaryPortions(totalAmount, amilCount, beneficiaryCount, 100);
 
     const calculateCashAmilAndBeneficiaryPortions = (
       totalAmount: number,
       amilCount: number,
       beneficiaryCount: number
-    ) => {
-      const roundedTotal = Math.max(0, Math.round(totalAmount));
-      if (roundedTotal <= 0) {
-        return { amilPortion: 0, beneficiaryPortion: 0 };
-      }
-      if (amilCount === 0) {
-        return { amilPortion: 0, beneficiaryPortion: roundedTotal };
-      }
-      if (beneficiaryCount === 0) {
-        return { amilPortion: roundedTotal, beneficiaryPortion: 0 };
-      }
-
-      let rawAmilPortion = roundedTotal * AMIL_PERCENTAGE;
-      if (amilDistributionMode === "proportional_with_factor") {
-        const proportionalPortion = roundedTotal * (amilCount / (amilCount + beneficiaryCount));
-        rawAmilPortion = proportionalPortion * amilShareFactor;
-      }
-
-      const amilPortion = Math.max(0, Math.min(roundedTotal, Math.round(rawAmilPortion)));
-      return {
-        amilPortion,
-        beneficiaryPortion: roundedTotal - amilPortion,
-      };
-    };
+    ) => splitAmilAndBeneficiaryPortions(totalAmount, amilCount, beneficiaryCount, 1);
 
     // Helper to calculate weighted distribution
     const distributeByWeight = (
@@ -342,16 +330,7 @@ export function useDistributionCalculation(
         eligibleBeneficiaries.length
       );
 
-      const amilAmount = eligibleAmil.length > 0 ? amilPortion / eligibleAmil.length : 0;
-      const amilDistribution = eligibleAmil.map(a => ({
-        mustahikId: a.id,
-        name: a.name,
-        asnaf: getAsnafCode(a),
-        priority: a.priority,
-        cashAmount: 0,
-        riceAmount: Number(amilAmount.toFixed(2)),
-        foodAmount: 0,
-      }));
+      const amilDistribution = distributeEqually(eligibleAmil, amilPortion, "rice");
 
       const beneficiaryDistribution =
         amilDistributionMode === "proportional_with_factor"
