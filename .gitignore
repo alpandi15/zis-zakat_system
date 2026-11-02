@@ -17,6 +17,9 @@ out
 .env
 .env.local
 
+# State lokal Supabase CLI (berisi project ref & connection string)
+supabase/.temp/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

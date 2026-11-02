@@ -1,17 +1,25 @@
--- Bootstrap first super admin user so fresh installs can log in immediately.
--- This migration is idempotent:
--- 1) If any super_admin already exists, it does nothing.
--- 2) Otherwise it ensures a default admin user exists and grants super_admin role.
+-- Membuat super admin pertama agar instalasi baru bisa langsung login.
 --
--- Default credentials (change password immediately after first login):
---   email: admin@zakatku.local
---   password: Admin123!
+-- Tidak ada kredensial bawaan di repositori ini. Migrasi hanya berjalan bila
+-- operator menyetel sendiri email dan passwordnya lewat setelan database,
+-- misalnya dari SQL Editor Supabase:
+--
+--   select set_config('zakatku.bootstrap_admin_email', 'admin@domainanda.com', false);
+--   select set_config('zakatku.bootstrap_admin_password', 'PasswordKuatAnda', false);
+--
+-- Sifatnya idempoten:
+-- 1) Dilewati bila kedua setelan di atas kosong.
+-- 2) Dilewati bila sudah ada super_admin.
+-- 3) Selain itu, akun dibuat dan diberi peran super_admin.
 
 DO $$
 DECLARE
-  bootstrap_email TEXT := 'admin@zakatku.local';
-  bootstrap_password TEXT := 'Admin123!';
-  bootstrap_full_name TEXT := 'Super Admin';
+  bootstrap_email TEXT := nullif(btrim(coalesce(current_setting('zakatku.bootstrap_admin_email', true), '')), '');
+  bootstrap_password TEXT := nullif(coalesce(current_setting('zakatku.bootstrap_admin_password', true), ''), '');
+  bootstrap_full_name TEXT := coalesce(
+    nullif(btrim(coalesce(current_setting('zakatku.bootstrap_admin_name', true), '')), ''),
+    'Super Admin'
+  );
   bootstrap_user_id UUID;
   auth_instance_id UUID;
   existing_super_admin_count INTEGER;
@@ -23,6 +31,12 @@ BEGIN
   LIMIT 1;
 
   auth_instance_id := COALESCE(auth_instance_id, '00000000-0000-0000-0000-000000000000'::UUID);
+
+  -- Tanpa kredensial yang disetel operator, migrasi tidak membuat akun apa pun.
+  IF bootstrap_email IS NULL OR bootstrap_password IS NULL THEN
+    RAISE NOTICE 'Bootstrap super admin dilewati: setel zakatku.bootstrap_admin_email dan zakatku.bootstrap_admin_password lebih dulu.';
+    RETURN;
+  END IF;
 
   SELECT COUNT(*)
   INTO existing_super_admin_count
