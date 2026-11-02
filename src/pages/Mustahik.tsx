@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { DataTable, Column } from "@/components/shared/DataTable";
+import { MustahikGroupedTable } from "@/components/mustahik/MustahikGroupedTable";
 import { PageHeader, StatTile } from "@/components/shared/PageHeader";
 import { ReadOnlyBanner } from "@/components/shared/ReadOnlyBanner";
 import { AsnafEligibilityBadges } from "@/components/shared/AsnafEligibilityBadges";
@@ -39,13 +39,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { exportToPDF } from "@/lib/exportUtils";
+import { exportReportToPDF, type ReportColumn, type ReportTableSection } from "@/lib/exportUtils";
 import { isMissingColumnError } from "@/lib/tagUtils";
 import {
   AlertCircle,
   Download,
-  Edit,
-  Eye,
   Filter,
   HeartHandshake,
   ListOrdered,
@@ -54,7 +52,6 @@ import {
   Route,
   Search,
   StickyNote,
-  Trash2,
   UserCheck,
   Users,
 } from "lucide-react";
@@ -639,113 +636,81 @@ export default function MustahikPage() {
       return;
     }
 
-    const filterSummary = [
-      asnafFilter === "all" ? "Semua Asnaf" : asnafFilter === "amil" ? "Amil" : "Non-Amil",
-      rtFilter === "all" ? "Semua RT" : `RT ${rtFilter}`,
-      laneFilter === "all" ? "Semua Gang" : `Gang ${laneFilter}`,
-    ].join(" • ");
+    const asnafLabel = asnafFilter === "all" ? "Semua Asnaf" : asnafFilter === "amil" ? "Amil" : "Non-Amil";
+    const rtLabel = rtFilter === "all" ? "Semua RT" : `RT ${rtFilter}`;
+    const laneLabel = laneFilter === "all" ? "Semua Gang" : `Gang ${laneFilter}`;
 
-    exportToPDF(
+    const columns: ReportColumn[] = [
+      { header: "No", key: "no", align: "center", pdfWidth: 9 },
+      { header: "Nama", key: "name", pdfWidth: 40 },
+      { header: "Asnaf", key: "asnaf", pdfWidth: 22 },
+      { header: "RT", key: "distribution_rt", align: "center", pdfWidth: 13 },
+      { header: "Gang/Jalur", key: "distribution_lane", pdfWidth: 24 },
+      { header: "Urut", key: "delivery_order", align: "center", pdfWidth: 11 },
+      { header: "Alamat", key: "address" },
+      { header: "Paraf", key: "sign", pdfWidth: 16 },
+    ];
+
+    const toRows = (items: Mustahik[]) =>
+      items.map((item, index) => ({
+        no: index + 1,
+        name: item.name,
+        asnaf: item.asnaf_settings?.asnaf_name || "-",
+        distribution_rt: item.distribution_rt || "-",
+        distribution_lane: item.distribution_lane || "-",
+        delivery_order: typeof item.delivery_order === "number" ? String(item.delivery_order) : "-",
+        address: item.address || "-",
+        sign: " ",
+      }));
+
+    const penerima = filteredMustahikList.filter((item) => item.asnaf_settings?.asnaf_code !== "amil");
+    const amil = filteredMustahikList.filter((item) => item.asnaf_settings?.asnaf_code === "amil");
+
+    const tables: ReportTableSection[] = [];
+    if (penerima.length > 0) {
+      tables.push({
+        type: "table",
+        title: `Mustahik Penerima (${penerima.length} orang)`,
+        note: "Fakir, miskin, dan golongan asnaf selain amil. Diurutkan berdasarkan nomor urut distribusi.",
+        columns,
+        rows: toRows(penerima),
+      });
+    }
+    if (amil.length > 0) {
+      tables.push({
+        type: "table",
+        title: `Amil Zakat (${amil.length} orang)`,
+        note: "Panitia / pengelola zakat yang berhak atas bagian amil.",
+        columns,
+        rows: toRows(amil),
+      });
+    }
+
+    exportReportToPDF(
       {
-        title: "Daftar Mustahik Terfilter",
-        subtitle: selectedPeriod?.name
-          ? `${selectedPeriod.name} • ${filterSummary}`
-          : filterSummary,
-        columns: [
-          { header: "No", key: "no", width: 8 },
-          { header: "Nama", key: "name", width: 28 },
-          { header: "RT", key: "distribution_rt", width: 16 },
-          { header: "Gang/Jalur", key: "distribution_lane", width: 24 },
-          { header: "Urut", key: "delivery_order", width: 10 },
-          { header: "Alamat", key: "address", width: 48 },
+        title: "Daftar Mustahik",
+        subtitle: selectedPeriod?.name || undefined,
+        meta: [
+          ...(selectedPeriod?.name ? [{ label: "Periode", value: selectedPeriod.name }] : []),
+          { label: "Filter", value: [asnafLabel, rtLabel, laneLabel].join(", ") },
+          ...(searchQuery.trim() ? [{ label: "Pencarian", value: `"${searchQuery.trim()}"` }] : []),
         ],
-        rows: filteredMustahikList.map((item, index) => ({
-          no: index + 1,
-          name: item.name,
-          distribution_rt: item.distribution_rt || "-",
-          distribution_lane: item.distribution_lane || "-",
-          delivery_order: item.delivery_order ?? "-",
-          address: item.address || "-",
-        })),
-        summary: {
-          "Total Mustahik": filteredMustahikList.length,
-          "Filter Asnaf": asnafFilter === "all" ? "Semua Asnaf" : asnafFilter === "amil" ? "Amil" : "Non-Amil",
-          "Filter RT": rtFilter === "all" ? "Semua" : rtFilter,
-          "Filter Gang/Jalur": laneFilter === "all" ? "Semua" : laneFilter,
-        },
+        sections: [
+          {
+            type: "stats",
+            title: "Ringkasan",
+            items: [
+              { label: "Total Mustahik", value: `${filteredMustahikList.length.toLocaleString("id-ID")} orang` },
+              { label: "Penerima (Non-Amil)", value: `${penerima.length.toLocaleString("id-ID")} orang` },
+              { label: "Amil", value: `${amil.length.toLocaleString("id-ID")} orang` },
+            ],
+          },
+          ...tables,
+        ],
       },
       `mustahik-${new Date().toISOString().slice(0, 10)}`,
     );
   };
-
-  const columns: Column<Mustahik>[] = [
-    {
-      key: "row_number",
-      header: "No.",
-      className: "w-[68px] whitespace-nowrap",
-      render: (_item, index) => <span className="font-medium text-muted-foreground">{index + 1}</span>,
-    },
-    { key: "name", header: "Nama", className: 'whitespace-nowrap' },
-    {
-      key: "asnaf_id",
-      header: "Asnaf",
-      render: (item) => {
-        const asnafCode = item.asnaf_settings?.asnaf_code || "";
-        return (
-          <div className="flex max-w-[220px] flex-col gap-1.5">
-            <Badge
-              variant="outline"
-              className="whitespace-nowrap w-fit rounded-full border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
-            >
-              {item.asnaf_settings?.asnaf_name || "-"}
-            </Badge>
-            <div className="w-fit">
-              <AsnafEligibilityBadges asnafCode={asnafCode} size="sm" />
-            </div>
-          </div>
-        );
-      },
-    },
-    {
-      key: "distribution_rt",
-      header: "Wilayah Distribusi",
-      render: (item) => (
-        <div className="flex max-w-[250px] flex-wrap gap-1.5">
-          <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px] whitespace-nowrap">
-            {item.distribution_rt ? `RT ${item.distribution_rt}` : "RT belum diisi"}
-          </Badge>
-          <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-[11px] whitespace-nowrap">
-            {item.distribution_lane ? item.distribution_lane : "Gang belum diisi"}
-          </Badge>
-        </div>
-      ),
-    },
-    {
-      key: "delivery_order",
-      header: "Urutan",
-      render: (item) => (
-        <Badge className="rounded-full bg-emerald-600 px-2.5 py-0.5 text-[11px] whitespace-nowrap">
-          {typeof item.delivery_order === "number" ? `Urut ${item.delivery_order}` : "Belum diatur"}
-        </Badge>
-      ),
-    },
-    {
-      key: "priority",
-      header: "Prioritas",
-      render: (item) => (
-        <Badge variant={PRIORITY_COLORS[item.priority]} className="whitespace-nowrap">
-          {PRIORITY_LABELS[item.priority] || item.priority}
-        </Badge>
-      ),
-    },
-    {
-      key: "address",
-      header: "Alamat",
-      render: (item) => (
-        <p className="w-[320px] text-sm leading-5 text-foreground/90">{item.address || "-"}</p>
-      ),
-    },
-  ];
 
   return (
     <AppLayout title="Data Mustahik">
@@ -813,13 +778,16 @@ export default function MustahikPage() {
           />
         </section>
 
-        <DataTable
+        <MustahikGroupedTable
           title="Daftar Mustahik"
           data={filteredMustahikList}
-          columns={columns}
+          totalCount={mustahikList.length}
           isLoading={isLoading}
           isReadOnly={isReadOnly}
           emptyMessage="Belum ada data mustahik"
+          onView={(item) => setDetailMustahik(item)}
+          onEdit={(item) => handleEdit(item)}
+          onDelete={(item) => setDeletingMustahik(item)}
           headerActions={
             <div className="grid w-full gap-2 lg:min-w-[720px] lg:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))_auto]">
               <div className="relative">
@@ -908,23 +876,6 @@ export default function MustahikPage() {
               </div>
             </div>
           }
-          actions={(mustahik) => (
-            <div className="flex items-center gap-0.5">
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDetailMustahik(mustahik)}>
-                <Eye className="h-4 w-4" />
-              </Button>
-              {!isReadOnly ? (
-                <>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(mustahik)}>
-                    <Edit className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDeletingMustahik(mustahik)}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
-                </>
-              ) : null}
-            </div>
-          )}
         />
       </div>
 

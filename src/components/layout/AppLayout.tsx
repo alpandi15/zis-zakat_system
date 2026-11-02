@@ -1,10 +1,11 @@
-import { ReactNode, useEffect, useRef } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useAuth } from "@/hooks/useAuth";
 import { usePeriod } from "@/contexts/PeriodContext";
 import { SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
+import { ChangePasswordDialog } from "@/components/account/ChangePasswordDialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +20,7 @@ import { cn } from "@/lib/utils";
 import {
   Calculator,
   FileBarChart,
+  KeyRound,
   LayoutDashboard,
   Loader2,
   Lock,
@@ -88,8 +90,10 @@ function MobileBottomNav() {
 function HeaderUserMenu() {
   const { profile, signOut } = useAuth();
   const initial = profile?.full_name?.charAt(0)?.toUpperCase() || "U";
+  const [isPasswordOpen, setIsPasswordOpen] = useState(false);
 
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
@@ -116,6 +120,10 @@ function HeaderUserMenu() {
             Pengaturan
           </Link>
         </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setIsPasswordOpen(true)} className="cursor-pointer">
+          <KeyRound className="mr-2 h-4 w-4" />
+          Ubah Password
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={signOut} className="cursor-pointer text-destructive focus:text-destructive">
           <LogOut className="mr-2 h-4 w-4" />
@@ -123,6 +131,8 @@ function HeaderUserMenu() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    <ChangePasswordDialog open={isPasswordOpen} onOpenChange={setIsPasswordOpen} />
+    </>
   );
 }
 

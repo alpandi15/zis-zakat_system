@@ -13,6 +13,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -26,7 +27,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { Edit, Shield, UserCog, UserPlus } from "lucide-react";
+import { Edit, KeyRound, Loader2, Shield, UserCog, UserPlus } from "lucide-react";
 import { 
   AppRole, 
   ROLE_LABELS, 
@@ -66,11 +67,18 @@ export default function AdminMembers() {
   const [newUserFullName, setNewUserFullName] = useState("");
   const [newUserRole, setNewUserRole] = useState<AppRole>("viewer");
 
+  // Reset password state
+  const [passwordUser, setPasswordUser] = useState<UserWithRole | null>(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetPasswordConfirm, setResetPasswordConfirm] = useState("");
+
   const { toast } = useToast();
-  const { hasRole } = useAuth();
+  const { hasRole, roles: currentRoles, user: currentUser } = useAuth();
   const queryClient = useQueryClient();
   
   const canManageUsers = hasRole("super_admin");
+  // Ganti password pengguna lain hanya untuk role super_admin murni (bukan role setara).
+  const canResetPasswords = currentRoles.includes("super_admin");
 
   // Fetch all users with their roles
   const { data: users = [], isLoading } = useQuery({
@@ -321,6 +329,61 @@ export default function AdminMembers() {
     },
   });
 
+  const closePasswordDialog = () => {
+    setPasswordUser(null);
+    setResetPassword("");
+    setResetPasswordConfirm("");
+  };
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: async ({ userId, password }: { userId: string; password: string }) => {
+      const { data, error } = await supabase.functions.invoke("admin-update-password", {
+        body: { user_id: userId, password },
+      });
+
+      if (error) {
+        let message = error.message;
+        const context = (error as Error & { context?: unknown }).context;
+        if (context instanceof Response) {
+          const payload = await context.json().catch(() => null);
+          if (payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string") {
+            message = payload.error;
+          } else if (context.status === 404) {
+            message = "Edge Function admin-update-password belum tersedia. Jalankan: supabase functions deploy admin-update-password";
+          }
+        } else if (message.includes("Failed to send a request to the Edge Function")) {
+          message = "Edge Function admin-update-password belum tersedia. Jalankan: supabase functions deploy admin-update-password";
+        }
+        throw new Error(message);
+      }
+
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: () => {
+      const target = passwordUser?.full_name || passwordUser?.email || "pengguna";
+      closePasswordDialog();
+      toast({ title: "Password berhasil diubah", description: `Password ${target} sudah diperbarui.` });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Gagal mengubah password", description: error.message });
+    },
+  });
+
+  const handleResetPasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passwordUser) return;
+    if (resetPassword.length < 6) {
+      toast({ variant: "destructive", title: "Password minimal 6 karakter" });
+      return;
+    }
+    if (resetPassword !== resetPasswordConfirm) {
+      toast({ variant: "destructive", title: "Konfirmasi password tidak sama" });
+      return;
+    }
+    resetPasswordMutation.mutate({ userId: passwordUser.id, password: resetPassword });
+  };
+
   const resetAddForm = () => {
     setNewUserEmail("");
     setNewUserPassword("");
@@ -452,10 +515,23 @@ export default function AdminMembers() {
         addLabel="Tambah Pengguna"
         actions={(user) => (
           <div className="flex gap-1">
+            {canResetPasswords && user.id !== currentUser?.id && (
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Ubah password"
+                aria-label="Ubah password"
+                onClick={() => setPasswordUser(user)}
+              >
+                <KeyRound className="h-4 w-4" />
+              </Button>
+            )}
             {user.role !== "super_admin" && (
               <Button
                 variant="ghost"
                 size="icon"
+                title="Ubah role"
+                aria-label="Ubah role"
                 onClick={() => handleEdit(user)}
               >
                 <Edit className="h-4 w-4" />
@@ -515,6 +591,74 @@ export default function AdminMembers() {
               </Button>
               <Button type="submit" disabled={updateRoleMutation.isPending}>
                 Simpan
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Password Dialog (Super Admin only) */}
+      <Dialog
+        open={!!passwordUser}
+        onOpenChange={(open) => {
+          if (!open && !resetPasswordMutation.isPending) closePasswordDialog();
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5" />
+              Ubah Password Pengguna
+            </DialogTitle>
+            <DialogDescription>
+              Password baru langsung berlaku. Sampaikan ke pengguna secara langsung.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
+            <div className="rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+              <p className="truncate text-sm font-medium">{passwordUser?.full_name || "-"}</p>
+              <p className="truncate text-xs text-muted-foreground">{passwordUser?.email || "-"}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="reset_password">Password baru *</Label>
+              <PasswordInput
+                id="reset_password"
+                autoComplete="new-password"
+                placeholder="Minimal 6 karakter"
+                value={resetPassword}
+                onChange={(e) => setResetPassword(e.target.value)}
+                required
+                minLength={6}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="reset_password_confirm">Ulangi password baru *</Label>
+              <PasswordInput
+                id="reset_password_confirm"
+                autoComplete="new-password"
+                value={resetPasswordConfirm}
+                onChange={(e) => setResetPasswordConfirm(e.target.value)}
+                required
+              />
+              {resetPasswordConfirm && resetPassword !== resetPasswordConfirm && (
+                <p className="text-[11px] text-amber-700">Password belum sama.</p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={closePasswordDialog}
+                disabled={resetPasswordMutation.isPending}
+              >
+                Batal
+              </Button>
+              <Button type="submit" disabled={resetPasswordMutation.isPending}>
+                {resetPasswordMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {resetPasswordMutation.isPending ? "Menyimpan..." : "Simpan Password"}
               </Button>
             </div>
           </form>

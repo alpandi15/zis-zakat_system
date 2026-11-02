@@ -97,6 +97,11 @@ const ROUTE_SEO: Record<string, SeoEntry> = {
     title: "Live Monitoring TV",
     description: "Papan informasi publik real-time untuk penerimaan dan pendistribusian zakat masjid.",
   },
+  "/info": {
+    title: "Info Penerimaan Zakat",
+    description:
+      "Jadwal pembukaan zakat, besaran zakat fitrah per jiwa, status loket buka/tutup, dan ringkasan penerimaan zakat masjid.",
+  },
   "/404": {
     title: "Halaman Tidak Ditemukan",
     description: "Halaman yang Anda tuju tidak tersedia.",

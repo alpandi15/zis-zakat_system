@@ -9,11 +9,12 @@ export interface DashboardSummary {
     name: string;
     description: string | null;
     status: string;
-    start_date: string;
-    end_date: string;
+    start_date: string | null;
+    end_date: string | null;
     rice_amount_per_person: number;
     cash_amount_per_person: number;
     fidyah_daily_rate: number;
+    nisab_gold_price_per_gram?: number | null;
   };
 
   received: {

@@ -1,11 +1,14 @@
+import { useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { ChangePasswordDialog } from "@/components/account/ChangePasswordDialog";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { useAuth } from "@/hooks/useAuth";
 import { DataBackupCard } from "@/components/settings/DataBackupCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MASJID_ADDRESS, MASJID_NAME } from "@/lib/masjidProfile";
-import { Building2, Mail, Settings as SettingsIcon, Shield, User } from "lucide-react";
+import { Building2, KeyRound, Mail, Settings as SettingsIcon, Shield, User } from "lucide-react";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
@@ -22,6 +25,7 @@ export default function Settings() {
   const initial = profile?.full_name?.charAt(0)?.toUpperCase() || "U";
   // Cadangan dan reset dibatasi ke super admin murni, sesuai pemeriksaan di sisi database.
   const isSuperAdmin = roles.includes("super_admin");
+  const [isPasswordOpen, setIsPasswordOpen] = useState(false);
 
   return (
     <AppLayout title="Pengaturan">
@@ -52,6 +56,26 @@ export default function Settings() {
                     {profile?.email || "-"}
                   </p>
                 </div>
+              </div>
+
+              <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-border/60 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted">
+                    <KeyRound className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Password</p>
+                    <p className="text-xs text-muted-foreground">Ganti password akun Anda secara berkala.</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 w-full rounded-xl sm:w-auto"
+                  onClick={() => setIsPasswordOpen(true)}
+                >
+                  Ubah Password
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -105,6 +129,8 @@ export default function Settings() {
           </Card>
         </div>
       </div>
+
+      <ChangePasswordDialog open={isPasswordOpen} onOpenChange={setIsPasswordOpen} />
     </AppLayout>
   );
 }
