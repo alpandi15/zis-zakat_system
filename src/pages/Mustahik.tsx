@@ -35,6 +35,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -43,7 +51,10 @@ import { exportReportToPDF, type ReportColumn, type ReportTableSection } from "@
 import { isMissingColumnError } from "@/lib/tagUtils";
 import {
   AlertCircle,
+  ChevronDown,
   Download,
+  FileStack,
+  FileText,
   Filter,
   HeartHandshake,
   ListOrdered,
@@ -626,6 +637,142 @@ export default function MustahikPage() {
     }
   };
 
+  /** Satu PDF, tiap RT dimulai di halaman baru agar bisa dibagikan per wilayah. */
+  const handleExportPDFPerRt = () => {
+    if (filteredMustahikList.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Tidak ada data",
+        description: "Hasil filter kosong. Tidak ada data mustahik untuk diunduh.",
+      });
+      return;
+    }
+
+    const NO_RT = "__none__";
+    const byRt = new Map<string, Mustahik[]>();
+    filteredMustahikList.forEach((item) => {
+      const key = item.distribution_rt?.trim() || NO_RT;
+      byRt.set(key, [...(byRt.get(key) || []), item]);
+    });
+
+    const rtKeys = Array.from(byRt.keys()).sort((a, b) => {
+      if (a === NO_RT) return 1;
+      if (b === NO_RT) return -1;
+      return routeCollator.compare(a, b);
+    });
+    const rtLabel = (key: string) => (key === NO_RT ? "Tanpa RT" : `RT ${key}`);
+
+    // Urutan lapangan dalam satu RT: gang/jalur, lalu nomor urut, lalu nama.
+    const sortInRt = (items: Mustahik[]) =>
+      [...items].sort((left, right) => {
+        const byLane = compareNullableText(left.distribution_lane, right.distribution_lane);
+        if (byLane !== 0) return byLane;
+        const leftOrder = left.delivery_order ?? Number.MAX_SAFE_INTEGER;
+        const rightOrder = right.delivery_order ?? Number.MAX_SAFE_INTEGER;
+        if (leftOrder !== rightOrder) return orderSort === "asc" ? leftOrder - rightOrder : rightOrder - leftOrder;
+        return routeCollator.compare(left.name, right.name);
+      });
+
+    const columns: ReportColumn[] = [
+      { header: "No", key: "no", align: "center", pdfWidth: 9 },
+      { header: "Nama", key: "name", pdfWidth: 42 },
+      { header: "Gang/Jalur", key: "distribution_lane", pdfWidth: 28 },
+      { header: "Urut", key: "delivery_order", align: "center", pdfWidth: 11 },
+      { header: "Alamat", key: "address" },
+      { header: "Paraf", key: "sign", pdfWidth: 18 },
+    ];
+
+    const toRows = (items: Mustahik[]) =>
+      items.map((item, index) => ({
+        no: index + 1,
+        name: item.name,
+        distribution_lane: item.distribution_lane || "-",
+        delivery_order: typeof item.delivery_order === "number" ? String(item.delivery_order) : "-",
+        address: item.address || "-",
+        sign: " ",
+      }));
+
+    const isAmil = (item: Mustahik) => item.asnaf_settings?.asnaf_code === "amil";
+
+    const recapRows = rtKeys.map((key, index) => {
+      const items = byRt.get(key) || [];
+      const amil = items.filter(isAmil).length;
+      return {
+        no: index + 1,
+        rt: rtLabel(key),
+        lanes: new Set(items.map((item) => item.distribution_lane?.trim()).filter(Boolean)).size,
+        penerima: items.length - amil,
+        amil,
+        total: items.length,
+      };
+    });
+
+    const rtSections: ReportTableSection[] = rtKeys.flatMap((key) => {
+      const items = byRt.get(key) || [];
+      const penerima = sortInRt(items.filter((item) => !isAmil(item)));
+      const amil = sortInRt(items.filter(isAmil));
+      const signatures = [{ role: `Ketua ${rtLabel(key)}` }, { role: "Petugas Distribusi" }];
+
+      const sections: ReportTableSection[] = [];
+      if (penerima.length > 0) {
+        sections.push({
+          type: "table",
+          title: `${rtLabel(key)} - Mustahik Penerima (${penerima.length} orang)`,
+          note: "Diurutkan berdasarkan gang/jalur dan nomor urut distribusi. Mohon paraf saat paket diterima.",
+          columns,
+          rows: toRows(penerima),
+          pageBreakBefore: true,
+          pageLabel: rtLabel(key),
+        });
+      }
+      if (amil.length > 0) {
+        sections.push({
+          type: "table",
+          title: `${rtLabel(key)} - Amil Zakat (${amil.length} orang)`,
+          columns,
+          rows: toRows(amil),
+          pageBreakBefore: penerima.length === 0,
+          pageLabel: rtLabel(key),
+        });
+      }
+      sections[sections.length - 1].signatures = signatures;
+      return sections;
+    });
+
+    const asnafLabel = asnafFilter === "all" ? "Semua Asnaf" : asnafFilter === "amil" ? "Amil" : "Non-Amil";
+
+    exportReportToPDF(
+      {
+        title: "Daftar Mustahik per RT",
+        subtitle: selectedPeriod?.name || undefined,
+        meta: [
+          ...(selectedPeriod?.name ? [{ label: "Periode", value: selectedPeriod.name }] : []),
+          { label: "Filter", value: [asnafLabel, laneFilter === "all" ? "Semua Gang" : `Gang ${laneFilter}`].join(", ") },
+          { label: "Jumlah RT", value: String(rtKeys.length) },
+        ],
+        sections: [
+          {
+            type: "table",
+            title: "Rekap per RT",
+            note: "Setiap RT dicetak pada lembar tersendiri di halaman berikutnya.",
+            columns: [
+              { header: "No", key: "no", align: "center", pdfWidth: 10 },
+              { header: "RT / Wilayah", key: "rt" },
+              { header: "Jumlah Gang", key: "lanes", format: "number", pdfWidth: 28 },
+              { header: "Penerima", key: "penerima", format: "number", pdfWidth: 28, total: true },
+              { header: "Amil", key: "amil", format: "number", pdfWidth: 22, total: true },
+              { header: "Total", key: "total", format: "number", pdfWidth: 24, total: true },
+            ],
+            rows: recapRows,
+            showTotals: true,
+          },
+          ...rtSections,
+        ],
+      },
+      `mustahik-per-rt-${new Date().toISOString().slice(0, 10)}`,
+    );
+  };
+
   const handleExportPDF = () => {
     if (filteredMustahikList.length === 0) {
       toast({
@@ -643,7 +790,6 @@ export default function MustahikPage() {
     const columns: ReportColumn[] = [
       { header: "No", key: "no", align: "center", pdfWidth: 9 },
       { header: "Nama", key: "name", pdfWidth: 40 },
-      { header: "Asnaf", key: "asnaf", pdfWidth: 22 },
       { header: "RT", key: "distribution_rt", align: "center", pdfWidth: 13 },
       { header: "Gang/Jalur", key: "distribution_lane", pdfWidth: 24 },
       { header: "Urut", key: "delivery_order", align: "center", pdfWidth: 11 },
@@ -655,7 +801,6 @@ export default function MustahikPage() {
       items.map((item, index) => ({
         no: index + 1,
         name: item.name,
-        asnaf: item.asnaf_settings?.asnaf_name || "-",
         distribution_rt: item.distribution_rt || "-",
         distribution_lane: item.distribution_lane || "-",
         delivery_order: typeof item.delivery_order === "number" ? String(item.delivery_order) : "-",
@@ -733,10 +878,37 @@ export default function MustahikPage() {
           }
           actions={
             <>
-              <Button type="button" variant="outline" className="h-10 rounded-xl" onClick={handleExportPDF}>
-                <Download className="mr-2 h-4 w-4" />
-                Download PDF
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="outline" className="h-10 rounded-xl">
+                    <Download className="mr-2 h-4 w-4" />
+                    Download PDF
+                    <ChevronDown className="ml-1.5 h-3.5 w-3.5 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64 rounded-xl">
+                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                    Mengikuti filter & pencarian aktif
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={handleExportPDF} className="cursor-pointer items-start gap-2 py-2">
+                    <FileText className="mt-0.5 h-4 w-4" />
+                    <span>
+                      <span className="block text-sm font-medium">Daftar gabungan</span>
+                      <span className="block text-[11px] text-muted-foreground">Penerima & amil dalam satu daftar</span>
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleExportPDFPerRt} className="cursor-pointer items-start gap-2 py-2">
+                    <FileStack className="mt-0.5 h-4 w-4" />
+                    <span>
+                      <span className="block text-sm font-medium">Per RT (1 lembar per RT)</span>
+                      <span className="block text-[11px] text-muted-foreground">
+                        Rekap + lembar tiap RT dengan kolom paraf & tanda tangan
+                      </span>
+                    </span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               {!isReadOnly && (
                 <Button
                   className="h-10 rounded-xl"

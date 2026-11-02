@@ -64,6 +64,12 @@ export interface ReportTableSection {
   rows: Record<string, unknown>[];
   showTotals?: boolean;
   emptyMessage?: string;
+  /** Mulai section ini di halaman baru (PDF saja). */
+  pageBreakBefore?: boolean;
+  /** Label di kop halaman selama section ini dicetak, mis. "RT 01" (PDF saja). */
+  pageLabel?: string;
+  /** Blok tanda tangan tepat setelah tabel ini (PDF saja). */
+  signatures?: { role: string; name?: string }[];
 }
 
 export interface ReportStatsSection {
@@ -166,6 +172,8 @@ export function exportReportToPDF(report: ReportDocument, filename: string) {
 
   const printedAt = new Date().toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" });
 
+  let currentPageLabel: string | undefined;
+
   /* --- kop surat --- */
   const drawLetterhead = (): number => {
     const bandHeight = 24;
@@ -187,10 +195,11 @@ export function exportReportToPDF(report: ReportDocument, filename: string) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.text(pdfText(report.title), pageWidth - margin, 10, { align: "right" });
-    if (report.subtitle) {
-      doc.setFont("helvetica", "normal");
+    const subtitle = [currentPageLabel, report.subtitle].filter(Boolean).join(" - ");
+    if (subtitle) {
+      doc.setFont("helvetica", currentPageLabel ? "bold" : "normal");
       doc.setFontSize(8.5);
-      doc.text(pdfText(report.subtitle), pageWidth - margin, 15.5, { align: "right" });
+      doc.text(pdfText(subtitle), pageWidth - margin, 15.5, { align: "right" });
     }
 
     return bandHeight + 8;
@@ -371,9 +380,41 @@ export function exportReportToPDF(report: ReportDocument, filename: string) {
     cursorY = (lastTable?.finalY ?? cursorY) + 8;
   };
 
-  report.sections.forEach((section) => {
+  const drawSignatures = (signatures: { role: string; name?: string }[]) => {
+    const blockHeight = 34;
+    ensureSpace(blockHeight);
+
+    const perRow = signatures.length;
+    const slot = contentWidth / perRow;
+
+    doc.setTextColor(...INK);
+    signatures.forEach((signature, index) => {
+      const centerX = margin + slot * index + slot / 2;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.text(pdfText(signature.role), centerX, cursorY + 5, { align: "center" });
+
+      doc.setDrawColor(...HAIRLINE);
+      doc.line(centerX - slot * 0.32, cursorY + 24, centerX + slot * 0.32, cursorY + 24);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.text(pdfText(signature.name || "(....................................)"), centerX, cursorY + 28.5, {
+        align: "center",
+      });
+    });
+
+    cursorY += blockHeight;
+  };
+
+  report.sections.forEach((section, index) => {
+    if (section.type === "table") currentPageLabel = section.pageLabel;
+    if (section.type === "table" && section.pageBreakBefore && index > 0) addPage();
     if (section.type === "stats") drawStats(section);
-    else drawTable(section);
+    else {
+      drawTable(section);
+      if (section.signatures && section.signatures.length > 0) drawSignatures(section.signatures);
+    }
   });
 
   /* --- catatan --- */
@@ -391,32 +432,7 @@ export function exportReportToPDF(report: ReportDocument, filename: string) {
   }
 
   /* --- tanda tangan --- */
-  if (report.signatures && report.signatures.length > 0) {
-    const blockHeight = 34;
-    ensureSpace(blockHeight);
-
-    const perRow = report.signatures.length;
-    const slot = contentWidth / perRow;
-
-    doc.setTextColor(...INK);
-    report.signatures.forEach((signature, index) => {
-      const centerX = margin + slot * index + slot / 2;
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
-      doc.text(pdfText(signature.role), centerX, cursorY + 5, { align: "center" });
-
-      doc.setDrawColor(...HAIRLINE);
-      doc.line(centerX - slot * 0.32, cursorY + 24, centerX + slot * 0.32, cursorY + 24);
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8.5);
-      doc.text(pdfText(signature.name || "(....................................)"), centerX, cursorY + 28.5, {
-        align: "center",
-      });
-    });
-
-    cursorY += blockHeight;
-  }
+  if (report.signatures && report.signatures.length > 0) drawSignatures(report.signatures);
 
   /* --- footer semua halaman --- */
   const pageCount = doc.getNumberOfPages();
