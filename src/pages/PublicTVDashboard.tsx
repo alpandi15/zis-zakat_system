@@ -9,9 +9,11 @@ import {
   HandCoins,
   Maximize2,
   Minimize2,
+  Moon,
   Package,
   RefreshCw,
   Scale,
+  Sun,
   Users,
   Wheat,
 } from "lucide-react";
@@ -22,8 +24,12 @@ import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { useDashboardRealtime } from "@/hooks/useDashboardRealtime";
 import { getClientDeviceInfo } from "@/lib/deviceInfo";
 import { useCountUp } from "@/hooks/useCountUp";
+import { useTvTheme, type TvTheme } from "@/hooks/useTvTheme";
 
-const CASH_COLORS = ["#34d399", "#38bdf8", "#fbbf24"];
+const CASH_COLORS: Record<TvTheme, string[]> = {
+  dark: ["#34d399", "#38bdf8", "#fbbf24"],
+  light: ["#059669", "#0284c7", "#d97706"],
+};
 
 const toNumber = (value: unknown): number => {
   const numeric = Number(value);
@@ -81,39 +87,39 @@ type Accent = "emerald" | "amber" | "sky" | "cyan" | "violet";
 
 const ACCENTS: Record<Accent, { ring: string; glow: string; icon: string; label: string; bar: string }> = {
   emerald: {
-    ring: "border-emerald-400/25",
+    ring: "border-emerald-500/40 dark:border-emerald-400/25",
     glow: "from-emerald-400/25",
-    icon: "bg-emerald-400/15 text-emerald-300",
-    label: "text-emerald-200/80",
-    bar: "from-emerald-400 to-emerald-300",
+    icon: "bg-emerald-400/15 text-emerald-700 dark:text-emerald-300",
+    label: "text-emerald-700 dark:text-emerald-200/80",
+    bar: "from-emerald-600 to-emerald-500 dark:from-emerald-400 dark:to-emerald-300",
   },
   amber: {
-    ring: "border-amber-400/25",
+    ring: "border-amber-500/40 dark:border-amber-400/25",
     glow: "from-amber-400/25",
-    icon: "bg-amber-400/15 text-amber-300",
-    label: "text-amber-200/80",
-    bar: "from-amber-400 to-amber-300",
+    icon: "bg-amber-400/15 text-amber-700 dark:text-amber-300",
+    label: "text-amber-700 dark:text-amber-200/80",
+    bar: "from-amber-600 to-amber-500 dark:from-amber-400 dark:to-amber-300",
   },
   sky: {
-    ring: "border-sky-400/25",
+    ring: "border-sky-500/40 dark:border-sky-400/25",
     glow: "from-sky-400/25",
-    icon: "bg-sky-400/15 text-sky-300",
-    label: "text-sky-200/80",
-    bar: "from-sky-400 to-sky-300",
+    icon: "bg-sky-400/15 text-sky-700 dark:text-sky-300",
+    label: "text-sky-700 dark:text-sky-200/80",
+    bar: "from-sky-600 to-sky-500 dark:from-sky-400 dark:to-sky-300",
   },
   cyan: {
-    ring: "border-cyan-400/25",
+    ring: "border-cyan-500/40 dark:border-cyan-400/25",
     glow: "from-cyan-400/25",
-    icon: "bg-cyan-400/15 text-cyan-300",
-    label: "text-cyan-200/80",
-    bar: "from-cyan-400 to-cyan-300",
+    icon: "bg-cyan-400/15 text-cyan-700 dark:text-cyan-300",
+    label: "text-cyan-700 dark:text-cyan-200/80",
+    bar: "from-cyan-600 to-cyan-500 dark:from-cyan-400 dark:to-cyan-300",
   },
   violet: {
-    ring: "border-violet-400/25",
+    ring: "border-violet-500/40 dark:border-violet-400/25",
     glow: "from-violet-400/25",
-    icon: "bg-violet-400/15 text-violet-300",
-    label: "text-violet-200/80",
-    bar: "from-violet-400 to-violet-300",
+    icon: "bg-violet-400/15 text-violet-700 dark:text-violet-300",
+    label: "text-violet-700 dark:text-violet-200/80",
+    bar: "from-violet-600 to-violet-500 dark:from-violet-400 dark:to-violet-300",
   },
 };
 
@@ -139,10 +145,10 @@ const StatCard = ({
   return (
     <div
       style={{ animationDelay: `${delay}ms` }}
-      className={`group relative overflow-hidden rounded-3xl border ${tone.ring} bg-white/[0.04] p-4 opacity-0 shadow-[0_18px_60px_-30px_rgba(0,0,0,0.9)] backdrop-blur-xl animate-rise md:p-5`}
+      className={`group relative overflow-hidden rounded-3xl border ${tone.ring} bg-white/90 dark:bg-white/[0.04] p-4 opacity-0 shadow-[0_18px_50px_-32px_rgba(15,23,42,0.35)] dark:shadow-[0_18px_60px_-30px_rgba(0,0,0,0.9)] backdrop-blur-xl animate-rise md:p-5`}
     >
       <div className={`pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-gradient-to-br ${tone.glow} to-transparent blur-2xl`} />
-      <div className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 skew-x-12 bg-gradient-to-r from-transparent via-white/[0.07] to-transparent animate-sheen" />
+      <div className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 skew-x-12 bg-gradient-to-r from-transparent via-slate-400/10 to-transparent dark:via-white/[0.07] animate-sheen" />
 
       <div className="relative flex items-start justify-between gap-3">
         <p className={`text-[11px] font-medium uppercase tracking-[0.18em] ${tone.label} md:text-xs`}>{label}</p>
@@ -154,9 +160,9 @@ const StatCard = ({
       <AnimatedValue
         value={value}
         format={format}
-        className="relative mt-2 block text-2xl font-semibold tracking-tight text-white tabular-nums md:text-4xl"
+        className="relative mt-2 block text-2xl font-semibold tracking-tight text-slate-900 dark:text-white tabular-nums md:text-4xl"
       />
-      <p className="relative mt-1 text-[11px] text-slate-400 md:text-xs">{caption}</p>
+      <p className="relative mt-1 text-[11px] text-slate-600 dark:text-slate-400 md:text-xs">{caption}</p>
     </div>
   );
 };
@@ -164,6 +170,8 @@ const StatCard = ({
 export default function PublicTVDashboard() {
   const { data, isLoading, dataUpdatedAt, refetch } = useDashboardSummary();
   const deviceInfo = useMemo(() => getClientDeviceInfo(), []);
+  const { theme, toggleTheme } = useTvTheme();
+  const cashColors = CASH_COLORS[theme];
 
   // 🔥 realtime auto refresh
   useDashboardRealtime(() => {
@@ -285,11 +293,11 @@ export default function PublicTVDashboard() {
   const cashComposition = useMemo(() => {
     if (!mappedData) return [];
     return [
-      { name: "Zakat Fitrah", value: mappedData.received.zakatFitrahCash, color: CASH_COLORS[0] },
-      { name: "Zakat Mal", value: mappedData.received.zakatMal, color: CASH_COLORS[1] },
-      { name: "Fidyah", value: mappedData.received.fidyahCash, color: CASH_COLORS[2] },
+      { name: "Zakat Fitrah", value: mappedData.received.zakatFitrahCash, color: cashColors[0] },
+      { name: "Zakat Mal", value: mappedData.received.zakatMal, color: cashColors[1] },
+      { name: "Fidyah", value: mappedData.received.fidyahCash, color: cashColors[2] },
     ].filter((item) => item.value > 0);
-  }, [mappedData]);
+  }, [mappedData, cashColors]);
 
   const toggleFullscreen = async () => {
     try {
@@ -305,10 +313,12 @@ export default function PublicTVDashboard() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#050914] text-white">
-        <div className="flex items-center gap-3 text-xl md:text-3xl">
-          <RefreshCw className="h-7 w-7 animate-spin text-emerald-400" />
-          Memuat papan informasi...
+      <div className={theme}>
+        <div className="flex min-h-screen items-center justify-center bg-slate-100 dark:bg-[#050914] text-slate-900 dark:text-white">
+          <div className="flex items-center gap-3 text-xl md:text-3xl">
+            <RefreshCw className="h-7 w-7 animate-spin text-emerald-600 dark:text-emerald-400" />
+            Memuat papan informasi...
+          </div>
         </div>
       </div>
     );
@@ -316,11 +326,13 @@ export default function PublicTVDashboard() {
 
   if (!mappedData) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#050914] p-6 text-white">
-        <div className="max-w-xl text-center">
-          <Calendar className="mx-auto mb-4 h-16 w-16 text-slate-500" />
-          <h1 className="text-2xl font-semibold md:text-3xl">Belum Ada Data Periode</h1>
-          <p className="mt-2 text-sm text-slate-400">Papan informasi akan tampil setelah periode zakat dibuat.</p>
+      <div className={theme}>
+        <div className="flex min-h-screen items-center justify-center bg-slate-100 dark:bg-[#050914] p-6 text-slate-900 dark:text-white">
+          <div className="max-w-xl text-center">
+            <Calendar className="mx-auto mb-4 h-16 w-16 text-slate-600 dark:text-slate-500" />
+            <h1 className="text-2xl font-semibold md:text-3xl">Belum Ada Data Periode</h1>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">Papan informasi akan tampil setelah periode zakat dibuat.</p>
+          </div>
         </div>
       </div>
     );
@@ -350,7 +362,8 @@ export default function PublicTVDashboard() {
   ].filter(Boolean) as string[];
 
   return (
-    <div className="relative flex min-h-[100dvh] flex-col overflow-hidden bg-[#050914] text-slate-100">
+    <div className={theme}>
+    <div className="relative flex min-h-[100dvh] flex-col overflow-hidden bg-slate-100 dark:bg-[#050914] text-slate-800 dark:text-slate-100">
       {/* Latar aurora + grid halus */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute -left-[10%] -top-[20%] h-[55vw] w-[55vw] rounded-full bg-emerald-500/20 blur-[120px] animate-aurora" />
@@ -362,28 +375,28 @@ export default function PublicTVDashboard() {
           className="absolute bottom-[-25%] left-[25%] h-[50vw] w-[50vw] rounded-full bg-violet-500/15 blur-[130px] animate-aurora"
           style={{ animationDelay: "-12s" }}
         />
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.06)_1px,transparent_1px)] bg-[size:64px_64px]" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(5,9,20,0.85)_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.16)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.16)_1px,transparent_1px)] dark:bg-[linear-gradient(rgba(148,163,184,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.06)_1px,transparent_1px)] bg-[size:64px_64px]" />
+        <div className="absolute inset-0 hidden bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(5,9,20,0.85)_100%)] dark:block" />
       </div>
 
       <div className="relative z-10 mx-auto flex w-full max-w-[1800px] flex-1 flex-col gap-3 p-4 md:gap-4 md:p-6 lg:p-8">
         {/* Topbar */}
-        <header className="flex flex-col gap-3 rounded-3xl border border-white/10 bg-white/[0.04] px-4 py-3 opacity-0 backdrop-blur-xl animate-rise md:flex-row md:items-center md:justify-between md:px-6 md:py-4">
+        <header className="flex flex-col gap-3 rounded-3xl border border-slate-200 dark:border-white/10 bg-white/90 dark:bg-white/[0.04] px-4 py-3 opacity-0 backdrop-blur-xl animate-rise md:flex-row md:items-center md:justify-between md:px-6 md:py-4">
           <div className="flex min-w-0 flex-1 items-center gap-3 md:gap-4">
             <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400/30 to-sky-400/20 md:h-14 md:w-14">
               <span className="absolute inset-0 rounded-2xl bg-emerald-400/20 animate-glow-pulse" />
-              <Activity className="relative h-5 w-5 text-emerald-300 md:h-7 md:w-7" />
+              <Activity className="relative h-5 w-5 text-emerald-700 dark:text-emerald-300 md:h-7 md:w-7" />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-lg font-semibold tracking-tight text-white md:text-3xl">{MASJID_NAME}</h1>
-              <p className="truncate text-[11px] text-slate-400 md:text-sm">{MASJID_ADDRESS}</p>
-              <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-300 md:text-sm">
-                <span className="truncate font-medium text-emerald-300">{mappedData.period.name}</span>
-                <span className="text-slate-500">
+              <h1 className="truncate text-lg font-semibold tracking-tight text-slate-900 dark:text-white md:text-3xl">{MASJID_NAME}</h1>
+              <p className="truncate text-[11px] text-slate-600 dark:text-slate-400 md:text-sm">{MASJID_ADDRESS}</p>
+              <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-700 dark:text-slate-300 md:text-sm">
+                <span className="truncate font-medium text-emerald-700 dark:text-emerald-300">{mappedData.period.name}</span>
+                <span className="text-slate-600 dark:text-slate-500">
                   {mappedData.period.hijri_year} H / {mappedData.period.gregorian_year} M
                 </span>
                 {mappedData.period.status === "archived" && (
-                  <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-200">
+                  <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200">
                     Arsip
                   </span>
                 )}
@@ -393,27 +406,37 @@ export default function PublicTVDashboard() {
 
           <div className="flex w-full shrink-0 flex-col items-start gap-2 md:w-auto md:items-end md:gap-2.5">
             <div className="flex flex-wrap items-center gap-2 md:justify-end">
-            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-200 md:text-xs">
+            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-800 dark:text-emerald-200 md:text-xs">
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 animate-glow-pulse" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-300" />
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 dark:bg-emerald-400 animate-glow-pulse" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500 dark:bg-emerald-300" />
               </span>
               Live
             </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-[11px] text-slate-300 md:text-xs">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.05] px-3 py-1.5 text-[11px] text-slate-700 dark:text-slate-300 md:text-xs">
               <Users className="h-3.5 w-3.5" />
               {watchingCount.toLocaleString("id-ID")} menonton
             </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-[11px] text-slate-300 md:text-xs">
-              <RefreshCw className="h-3.5 w-3.5 text-emerald-300" />
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.05] px-3 py-1.5 text-[11px] text-slate-700 dark:text-slate-300 md:text-xs">
+              <RefreshCw className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
               {new Date(dataUpdatedAt).toLocaleTimeString("id-ID")}
             </span>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={theme === "dark" ? "Ganti ke mode terang" : "Ganti ke mode gelap"}
+              title={theme === "dark" ? "Mode terang" : "Mode gelap"}
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.05] px-3 py-1.5 text-[11px] text-slate-700 dark:text-slate-300 transition-colors hover:border-emerald-400/40 hover:bg-emerald-400/10 hover:text-emerald-800 dark:hover:text-emerald-200 md:text-xs"
+            >
+              {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+              <span className="hidden sm:inline">{theme === "dark" ? "Terang" : "Gelap"}</span>
+            </button>
             <button
               type="button"
               onClick={toggleFullscreen}
               aria-label={isFullscreen ? "Keluar layar penuh" : "Tampilkan layar penuh"}
               title={isFullscreen ? "Keluar layar penuh" : "Layar penuh"}
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-[11px] text-slate-300 transition-colors hover:border-emerald-400/40 hover:bg-emerald-400/10 hover:text-emerald-200 md:text-xs"
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.05] px-3 py-1.5 text-[11px] text-slate-700 dark:text-slate-300 transition-colors hover:border-emerald-400/40 hover:bg-emerald-400/10 hover:text-emerald-800 dark:hover:text-emerald-200 md:text-xs"
             >
               {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
               <span className="hidden sm:inline">{isFullscreen ? "Keluar" : "Layar penuh"}</span>
@@ -421,10 +444,10 @@ export default function PublicTVDashboard() {
             </div>
 
             <div className="w-full text-left md:w-auto md:text-right">
-              <p className="text-3xl font-semibold leading-none tracking-tight text-white tabular-nums md:text-5xl">
+              <p className="text-3xl font-semibold leading-none tracking-tight text-slate-900 dark:text-white tabular-nums md:text-5xl">
                 {currentTime.toLocaleTimeString("id-ID")}
               </p>
-              <p className="mt-1 text-[11px] text-slate-400 md:text-sm">
+              <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-400 md:text-sm">
                 {currentTime.toLocaleDateString("id-ID", {
                   weekday: "long",
                   day: "numeric",
@@ -441,8 +464,8 @@ export default function PublicTVDashboard() {
           style={{ animationDelay: "40ms" }}
           className={`relative flex flex-col gap-3 overflow-hidden rounded-3xl border px-4 py-3 opacity-0 backdrop-blur-xl animate-rise motion-reduce:animate-none motion-reduce:opacity-100 sm:flex-row sm:items-center sm:justify-between md:px-6 md:py-4 ${
             mappedData.service.isOpen
-              ? "border-emerald-400/40 bg-emerald-400/[0.10]"
-              : "border-rose-400/30 bg-rose-400/[0.07]"
+              ? "border-emerald-300 bg-emerald-50 dark:border-emerald-400/40 dark:bg-emerald-400/[0.10]"
+              : "border-rose-300 bg-rose-50 dark:border-rose-400/30 dark:bg-rose-400/[0.07]"
           }`}
         >
           <div
@@ -454,7 +477,7 @@ export default function PublicTVDashboard() {
           <div className="relative flex items-center gap-3 md:gap-4">
             <div
               className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl md:h-16 md:w-16 ${
-                mappedData.service.isOpen ? "bg-emerald-400/20 text-emerald-300" : "bg-rose-400/15 text-rose-300"
+                mappedData.service.isOpen ? "bg-emerald-400/20 text-emerald-700 dark:text-emerald-300" : "bg-rose-400/15 text-rose-700 dark:text-rose-300"
               }`}
             >
               {mappedData.service.isOpen ? (
@@ -467,12 +490,12 @@ export default function PublicTVDashboard() {
             <div className="min-w-0">
               <p
                 className={`text-2xl font-semibold tracking-tight md:text-4xl ${
-                  mappedData.service.isOpen ? "text-emerald-300" : "text-rose-300"
+                  mappedData.service.isOpen ? "text-emerald-700 dark:text-emerald-300" : "text-rose-700 dark:text-rose-300"
                 }`}
               >
                 {mappedData.service.isOpen ? "SEDANG BUKA" : "SEDANG TUTUP"}
               </p>
-              <p className="mt-0.5 text-[11px] text-slate-300 md:text-sm">
+              <p className="mt-0.5 text-[11px] text-slate-700 dark:text-slate-300 md:text-sm">
                 {mappedData.service.isOpen
                   ? mappedData.service.scheduledCloseAt
                     ? `Melayani ${formatClock(mappedData.service.openedAt)} s/d ${formatClock(mappedData.service.scheduledCloseAt)}`
@@ -482,7 +505,7 @@ export default function PublicTVDashboard() {
                     : "Loket zakat belum dibuka"}
               </p>
               {mappedData.service.isOpen && mappedData.service.note && (
-                <p className="mt-0.5 truncate text-[11px] text-emerald-200/80 md:text-sm">
+                <p className="mt-0.5 truncate text-[11px] text-emerald-700 dark:text-emerald-200/80 md:text-sm">
                   {mappedData.service.note}
                 </p>
               )}
@@ -492,17 +515,17 @@ export default function PublicTVDashboard() {
           <span
             className={`relative inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] md:text-xs ${
               mappedData.service.isOpen
-                ? "border-emerald-400/40 bg-emerald-400/15 text-emerald-200"
-                : "border-rose-400/30 bg-rose-400/10 text-rose-200"
+                ? "border-emerald-400/40 bg-emerald-400/15 text-emerald-800 dark:text-emerald-200"
+                : "border-rose-400/30 bg-rose-400/10 text-rose-800 dark:text-rose-200"
             }`}
           >
             <span className="relative flex h-2 w-2">
               {mappedData.service.isOpen && (
-                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 animate-glow-pulse" />
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 dark:bg-emerald-400 animate-glow-pulse" />
               )}
               <span
                 className={`relative inline-flex h-2 w-2 rounded-full ${
-                  mappedData.service.isOpen ? "bg-emerald-300" : "bg-rose-400"
+                  mappedData.service.isOpen ? "bg-emerald-500 dark:bg-emerald-300" : "bg-rose-500 dark:bg-rose-400"
                 }`}
               />
             </span>
@@ -563,11 +586,11 @@ export default function PublicTVDashboard() {
         <section className="grid flex-1 gap-3 xl:grid-cols-[1.25fr_1fr]">
           <div
             style={{ animationDelay: "460ms" }}
-            className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] p-4 opacity-0 backdrop-blur-xl animate-rise md:p-6"
+            className="relative overflow-hidden rounded-3xl border border-slate-200 dark:border-white/10 bg-white/90 dark:bg-white/[0.04] p-4 opacity-0 backdrop-blur-xl animate-rise md:p-6"
           >
             <div className="flex items-baseline justify-between gap-3">
-              <h2 className="text-base font-semibold text-white md:text-xl">Komposisi Penerimaan Kas</h2>
-              <span className="text-[11px] uppercase tracking-[0.18em] text-slate-400 md:text-xs">Realtime</span>
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white md:text-xl">Komposisi Penerimaan Kas</h2>
+              <span className="text-[11px] uppercase tracking-[0.18em] text-slate-600 dark:text-slate-400 md:text-xs">Realtime</span>
             </div>
 
             <div className="mt-3 grid gap-4 lg:grid-cols-[260px_1fr] lg:items-center">
@@ -589,22 +612,22 @@ export default function PublicTVDashboard() {
                           animationDuration={900}
                         >
                           {cashComposition.map((entry, index) => (
-                            <Cell key={entry.name} fill={entry.color || CASH_COLORS[index % CASH_COLORS.length]} />
+                            <Cell key={entry.name} fill={entry.color || cashColors[index % cashColors.length]} />
                           ))}
                         </Pie>
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400">Total Kas</p>
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-600 dark:text-slate-400">Total Kas</p>
                       <AnimatedValue
                         value={totalReceivedCash}
                         format={formatCurrency}
-                        className="mt-1 max-w-[85%] text-base font-semibold text-white tabular-nums md:text-xl"
+                        className="mt-1 max-w-[85%] text-base font-semibold text-slate-900 dark:text-white tabular-nums md:text-xl"
                       />
                     </div>
                   </>
                 ) : (
-                  <div className="flex h-full items-center justify-center rounded-full border border-dashed border-white/10 text-center text-xs text-slate-500">
+                  <div className="flex h-full items-center justify-center rounded-full border border-dashed border-slate-200 dark:border-white/10 text-center text-xs text-slate-600 dark:text-slate-500">
                     Belum ada
                     <br />
                     penerimaan kas
@@ -617,26 +640,26 @@ export default function PublicTVDashboard() {
                   const share = totalReceivedCash > 0 ? (item.value / totalReceivedCash) * 100 : 0;
                   const tone = ACCENTS[item.accent];
                   return (
-                    <div key={item.name} className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                    <div key={item.name} className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03] px-3 py-2.5">
                       <div className="flex items-center justify-between gap-3">
-                        <span className="flex items-center gap-2 text-xs text-slate-300 md:text-sm">
-                          <item.icon className="h-4 w-4 text-slate-400" />
+                        <span className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 md:text-sm">
+                          <item.icon className="h-4 w-4 text-slate-600 dark:text-slate-400" />
                           {item.name}
                         </span>
                         <AnimatedValue
                           value={item.value}
                           format={formatCurrency}
-                          className="text-sm font-semibold text-white tabular-nums md:text-base"
+                          className="text-sm font-semibold text-slate-900 dark:text-white tabular-nums md:text-base"
                         />
                       </div>
                       <div className="mt-2 flex items-center gap-2">
-                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.07]">
+                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-white/[0.07]">
                           <div
                             className={`h-full rounded-full bg-gradient-to-r ${tone.bar} transition-[width] duration-1000 ease-out`}
                             style={{ width: `${Math.min(100, share)}%` }}
                           />
                         </div>
-                        <span className="w-11 text-right text-[11px] text-slate-400 tabular-nums">{share.toFixed(1)}%</span>
+                        <span className="w-11 text-right text-[11px] text-slate-600 dark:text-slate-400 tabular-nums">{share.toFixed(1)}%</span>
                       </div>
                     </div>
                   );
@@ -648,14 +671,14 @@ export default function PublicTVDashboard() {
           <div className="grid gap-3">
             <div
               style={{ animationDelay: "540ms" }}
-              className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 opacity-0 backdrop-blur-xl animate-rise md:p-6"
+              className="rounded-3xl border border-slate-200 dark:border-white/10 bg-white/90 dark:bg-white/[0.04] p-4 opacity-0 backdrop-blur-xl animate-rise md:p-6"
             >
               <div className="flex items-baseline justify-between gap-3">
-                <h2 className="text-base font-semibold text-white md:text-xl">Penerimaan Barang</h2>
+                <h2 className="text-base font-semibold text-slate-900 dark:text-white md:text-xl">Penerimaan Barang</h2>
                 <AnimatedValue
                   value={totalGoodsKg}
                   format={formatWeight}
-                  className="text-sm font-semibold text-emerald-300 tabular-nums md:text-base"
+                  className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums md:text-base"
                 />
               </div>
 
@@ -664,9 +687,9 @@ export default function PublicTVDashboard() {
                   const share = totalGoodsKg > 0 ? (item.value / totalGoodsKg) * 100 : 0;
                   const tone = ACCENTS[item.accent];
                   return (
-                    <div key={item.name} className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3">
+                    <div key={item.name} className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03] px-3 py-3">
                       <div className="flex items-center justify-between gap-3">
-                        <span className="flex items-center gap-2 text-xs text-slate-300 md:text-sm">
+                        <span className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 md:text-sm">
                           <span className={`rounded-lg ${tone.icon} p-1.5`}>
                             <item.icon className="h-3.5 w-3.5" />
                           </span>
@@ -675,10 +698,10 @@ export default function PublicTVDashboard() {
                         <AnimatedValue
                           value={item.value}
                           format={formatWeight}
-                          className="text-base font-semibold text-white tabular-nums md:text-lg"
+                          className="text-base font-semibold text-slate-900 dark:text-white tabular-nums md:text-lg"
                         />
                       </div>
-                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.07]">
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-white/[0.07]">
                         <div
                           className={`h-full rounded-full bg-gradient-to-r ${tone.bar} transition-[width] duration-1000 ease-out`}
                           style={{ width: `${Math.min(100, share)}%` }}
@@ -692,28 +715,28 @@ export default function PublicTVDashboard() {
 
             <div
               style={{ animationDelay: "620ms" }}
-              className="grid gap-2 rounded-3xl border border-white/10 bg-white/[0.04] p-4 opacity-0 backdrop-blur-xl animate-rise md:p-6"
+              className="grid gap-2 rounded-3xl border border-slate-200 dark:border-white/10 bg-white/90 dark:bg-white/[0.04] p-4 opacity-0 backdrop-blur-xl animate-rise md:p-6"
             >
-              <h2 className="text-base font-semibold text-white md:text-xl">Aktivitas Penerimaan</h2>
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white md:text-xl">Aktivitas Penerimaan</h2>
               <div className="grid gap-2 sm:grid-cols-3">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
-                  <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Pertama</p>
-                  <p className="mt-1 text-xs font-medium text-slate-100 md:text-sm">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03] px-3 py-2.5">
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-slate-600 dark:text-slate-400">Pertama</p>
+                  <p className="mt-1 text-xs font-medium text-slate-800 dark:text-slate-100 md:text-sm">
                     {formatDateTime(mappedData.receiptWindow.firstReceiptAt)}
                   </p>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
-                  <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Terakhir</p>
-                  <p className="mt-1 text-xs font-medium text-slate-100 md:text-sm">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03] px-3 py-2.5">
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-slate-600 dark:text-slate-400">Terakhir</p>
+                  <p className="mt-1 text-xs font-medium text-slate-800 dark:text-slate-100 md:text-sm">
                     {formatDateTime(mappedData.receiptWindow.latestReceiptAt)}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-cyan-400/25 bg-cyan-400/10 px-3 py-2.5">
-                  <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200/80">Total Transaksi</p>
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-700 dark:text-cyan-200/80">Total Transaksi</p>
                   <AnimatedValue
                     value={mappedData.totalTransactions}
                     format={formatCount}
-                    className="mt-1 block text-lg font-semibold text-white tabular-nums md:text-2xl"
+                    className="mt-1 block text-lg font-semibold text-slate-900 dark:text-white tabular-nums md:text-2xl"
                   />
                 </div>
               </div>
@@ -723,13 +746,13 @@ export default function PublicTVDashboard() {
       </div>
 
       {/* Ticker berjalan */}
-      <footer className="relative z-10 border-t border-white/10 bg-white/[0.03] py-2.5 backdrop-blur-xl">
-        <div className="flex w-max animate-marquee items-center whitespace-nowrap text-xs text-slate-300 md:text-sm">
+      <footer className="relative z-10 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03] py-2.5 backdrop-blur-xl">
+        <div className="flex w-max animate-marquee items-center whitespace-nowrap text-xs text-slate-700 dark:text-slate-300 md:text-sm">
           {[0, 1].map((loop) => (
             <div key={loop} className="flex items-center gap-10 pl-10" aria-hidden={loop === 1}>
               {tickerItems.map((item) => (
                 <span key={`${loop}-${item}`} className="flex items-center gap-3">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
                   {item}
                 </span>
               ))}
@@ -737,6 +760,7 @@ export default function PublicTVDashboard() {
           ))}
         </div>
       </footer>
+    </div>
     </div>
   );
 }
